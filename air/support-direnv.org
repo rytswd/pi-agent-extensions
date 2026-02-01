@@ -1,0 +1,40 @@
+#+title: Support direnv
+#+state: complete
+#+FILETAGS: :direnv:extension:
+
+* Summary
+Pi extension that loads direnv environment variables into pi sessions, mimicking the shell hook behaviour.
+
+* Motivation
+When working in projects that use direnv for environment management (Nix flakes, project-specific env vars, etc.), pi sessions don't automatically pick up the =.envrc= configuration. This means tools invoked by pi may lack required environment variables like =PATH= additions, API keys, or Nix-provided tooling.
+
+** Goals
+- Automatically load direnv environment on session start
+- Re-evaluate after every bash command to catch =cd=, =git checkout=, =direnv allow=, etc.
+- Show clear status indication in the pi status bar
+- Handle slow direnv evaluations without blocking the session
+
+** Non-Goals
+- Managing =.envrc= files or running =direnv allow=
+- Supporting direnv alternatives (e.g., dotenv)
+
+* Proposal
+A single-file extension (=direnv.ts=) that:
+1. Subscribes to =session_start= and =tool_result= (bash) events
+2. Spawns =direnv export json= to get environment changes
+3. Applies the JSON output to =process.env=
+4. Displays status in pi's status bar
+
+* Design Details
+- Serialised execution via a =pending= promise — only one direnv process at a time
+- 10-second inline timeout; longer evaluations complete in the background
+- Empty JSON output (no changes) treated as success
+- Null values in JSON output trigger =delete process.env[key]=
+
+* References
+- Original implementation: [[https://github.com/Mic92/dotfiles/blob/main/home/.pi/agent/extensions/direnv.ts][Mic92/dotfiles — direnv.ts]]
+- direnv documentation: [[https://direnv.net/]]
+
+* Implementation History
+- 2026-01-31: Initial implementation based on Mic92's dotfiles
+- 2026-02-01: Context files and documentation added

@@ -1,0 +1,13 @@
+main-directory = "./air/"
+template-directory = "./air/templates/"
+archive-directory = "./air/archive/"
+context-directory = "./air/context/"
+supported-file-types = ["org"]
+default-file-type = "org"
+tags = []
+built-in-templates = ["air-standard"]
+
+[airctl-status]
+show-date = false
+show-tag = false
+hide-unknown = false
