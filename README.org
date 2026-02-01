@@ -1,0 +1,102 @@
+#+TITLE: pi-agent-extensions
+#+AUTHOR: rytswd
+#+OPTIONS: toc:3 num:nil ^:nil
+
+#+html:<div align="center">
+#+html:<p>A collection of extensions for <a href="https://github.com/mariozechner/pi">pi</a> coding agent</p>
+#+html:<p>
+#+html:<img src="https://img.shields.io/badge/pi-extensions-blue?style=flat-square" alt="pi extensions">
+#+html:<a href="https://github.com/rytswd/pi-agent-extensions"><img src="https://img.shields.io/badge/Source-grey?style=flat-square&logo=github" alt="GitHub Source"></a>
+#+html:<img src="https://img.shields.io/badge/License-MIT-blue?style=flat-square" alt="MIT License">
+#+html:</p>
+#+html:</div>
+
+-----
+
+** 🌄 Overview
+
+*pi-agent-extensions* is a collection of [[https://github.com/mariozechner/pi][pi]] coding agent extensions that enhance the development experience. Each extension is a standalone TypeScript file that plugs into pi's extension system.
+
+These extensions live in =~/.pi/agent/extensions/= for global auto-discovery — just drop them in and they're loaded on every pi session.
+
+** ✨ Extensions
+
+*** direnv
+
+Automatically loads [[https://direnv.net/][direnv]] environment variables into pi sessions. This mimics how the direnv shell hook works — it runs after every bash command to pick up any =.envrc= changes from =cd=, =git checkout=, etc.
+
+*Features:*
+- Loads environment on session start
+- Re-evaluates after every bash command (handles =cd=, =git checkout=, =direnv allow=, etc.)
+- Serialised execution — only one direnv process runs at a time
+- 10s timeout so fast completions are handled inline; longer ones finish in the background
+- Status bar indicator: =direnv …= (running), =direnv ✓= (loaded), =direnv ✗= (error)
+
+*Requirements:*
+- =direnv= installed and in PATH
+- =.envrc= must be allowed (run =direnv allow= in your shell first)
+
+#+begin_quote
+💡 The direnv extension is based on the original implementation by [[https://github.com/Mic92][Mic92]] from [[https://github.com/Mic92/dotfiles/blob/main/home/.pi/agent/extensions/direnv.ts][Mic92/dotfiles]]. Thanks Mic92!
+#+end_quote
+
+** 🚀 Quick Start
+
+*** 1. Clone to pi Extensions Directory
+
+#+begin_src bash
+git clone git@github.com:rytswd/pi-agent-extensions.git ~/.pi/agent/extensions
+#+end_src
+
+If you already have =~/.pi/agent/extensions/=, you can cherry-pick individual files instead.
+
+*** 2. Use pi as Normal
+
+Extensions are auto-discovered. Start pi in any project directory and they'll be loaded automatically.
+
+#+begin_src bash
+pi
+#+end_src
+
+You'll see the direnv status indicator in the status bar once it kicks in.
+
+** 📁 Structure
+
+#+begin_example
+~/.pi/agent/extensions/
+├── direnv.ts           # Direnv integration extension
+├── AGENTS.md           # Agent context for AI assistants
+├── air/                # Air documentation (development planning)
+│   ├── context/        # Project context files
+│   └── ...
+└── README.org          # This file
+#+end_example
+
+** 🔧 Adding New Extensions
+
+To add a new extension, create a =.ts= file in the root directory. pi auto-discovers any =*.ts= file here.
+
+A minimal extension looks like:
+
+#+begin_src typescript
+import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+
+export default function (pi: ExtensionAPI) {
+  pi.on("session_start", async (_event, ctx) => {
+    ctx.ui.notify("My extension loaded!", "info");
+  });
+}
+#+end_src
+
+For multi-file extensions, create a subdirectory with an =index.ts= entry point.
+
+See the [[https://github.com/mariozechner/pi][pi documentation]] for the full extension API.
+
+** 🙏 Acknowledgements
+
+- [[https://github.com/Mic92][Mic92]] — Original direnv extension implementation ([[https://github.com/Mic92/dotfiles/blob/main/home/.pi/agent/extensions/direnv.ts][source]])
+- [[https://github.com/mariozechner][Mario Zechner]] — pi coding agent
+
+** 📄 License
+
+MIT
