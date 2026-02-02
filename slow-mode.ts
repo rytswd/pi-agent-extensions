@@ -23,24 +23,34 @@ import type {
 import { Text, truncateToWidth } from "@mariozechner/pi-tui";
 
 export default function slowMode(pi: ExtensionAPI) {
+  // State: whether slow mode is currently enabled
   let enabled = false;
+
+  // Staging directory: stores proposed file changes for review
+  // Uses PID to avoid conflicts between concurrent pi sessions
   const tmpDir = `/tmp/pi-slow-mode-${process.pid}`;
 
   ////----------------------------------------
   ///     Toggle command
   //------------------------------------------
 
+  // Register /slow-mode command — toggle the interception gate on/off
   pi.registerCommand("slow-mode", {
     description: "Toggle slow mode — review write/edit changes before applying",
     handler: async (_args, ctx) => {
+      // No-op in headless mode (no TUI available)
       if (!ctx.hasUI) {
         return;
       }
+
+      // Flip the enabled flag
       enabled = !enabled;
       if (enabled) {
+        // Show status bar indicator when active
         ctx.ui.setStatus("slow-mode", ctx.ui.theme.fg("warning", "slow ■"));
         ctx.ui.notify("Slow mode enabled — write/edit changes require approval", "info");
       } else {
+        // Clear status bar indicator when disabled
         ctx.ui.setStatus("slow-mode", undefined);
         ctx.ui.notify("Slow mode disabled", "info");
       }
@@ -51,38 +61,66 @@ export default function slowMode(pi: ExtensionAPI) {
   ///     Tool call interception
   //------------------------------------------
 
+  // Hook into tool_call event — fires BEFORE tool execution
+  // Returning { block: true, reason } prevents the tool from running
   pi.on("tool_call", async (event, ctx) => {
+    // Pass through if slow mode is disabled or no UI available
     if (!enabled || !ctx.hasUI) return;
 
+    // Intercept write tool calls
     if (event.toolName === "write") {
       return await reviewWrite(event.input, ctx);
     }
+
+    // Intercept edit tool calls
     if (event.toolName === "edit") {
       return await reviewEdit(event.input, ctx);
     }
+
+    // All other tools pass through unchanged
   });
 
   ////----------------------------------------
   ///     Write & edit review
   //------------------------------------------
 
+  /**
+   * Resolves file path to be relative to cwd
+   * This normalizes absolute/relative paths for consistent staging
+   */
   function resolvePath(ctx: ExtensionContext, filePath: string) {
     return relative(ctx.cwd, resolve(ctx.cwd, filePath));
   }
 
+  /**
+   * Review handler for write tool calls (new files / overwrites)
+   *
+   * Flow:
+   * 1. Stage the proposed content in tmpDir
+   * 2. Show review UI with the full content
+   * 3. User approves → return undefined (tool proceeds)
+   * 4. User rejects → return { block: true } (tool aborted)
+   * 5. Cleanup staged file
+   */
   async function reviewWrite(
     input: Record<string, unknown>,
     ctx: ExtensionContext,
   ) {
     const filePath = input.path as string;
     const content = input.content as string;
+
+    // Skip if input is malformed
     if (!filePath || content == null) return;
 
+    // Resolve to relative path for staging
     const relPath = resolvePath(ctx, filePath);
     const stagePath = join(tmpDir, relPath);
+
+    // Write proposed content to staging directory
     ensureDir(dirname(stagePath));
     writeFileSync(stagePath, content, "utf-8");
 
+    // Show review UI — user decides to approve/reject
     const approved = await showReview(ctx, {
       operation: "WRITE",
       filePath: relPath,
@@ -90,13 +128,28 @@ export default function slowMode(pi: ExtensionAPI) {
       body: content,
     });
 
+    // Clean up staged file after decision
     cleanup(stagePath);
 
+    // Block the tool if user rejected
     if (!approved) {
       return { block: true, reason: "User rejected the write in slow mode review." };
     }
+
+    // Approved: return undefined → tool proceeds normally
   }
 
+  /**
+   * Review handler for edit tool calls (modifications to existing files)
+   *
+   * Flow:
+   * 1. Stage both old and new text as separate files
+   * 2. Generate unified diff for inline display
+   * 3. Show review UI with the diff (user can Ctrl+O to external viewer)
+   * 4. User approves → return undefined (tool proceeds)
+   * 5. User rejects → return { block: true } (tool aborted)
+   * 6. Cleanup both staged files
+   */
   async function reviewEdit(
     input: Record<string, unknown>,
     ctx: ExtensionContext,
@@ -104,12 +157,17 @@ export default function slowMode(pi: ExtensionAPI) {
     const filePath = input.path as string;
     const oldText = input.oldText as string;
     const newText = input.newText as string;
+
+    // Skip if input is malformed
     if (!filePath || oldText == null || newText == null) return;
 
     const relPath = resolvePath(ctx, filePath);
+
+    // Generate inline diff for TUI display
     const diff = generateUnifiedDiff(relPath, oldText, newText);
 
-    // Stage old and new files for external diff
+    // Stage old and new files for external diff viewer
+    // Timestamped to avoid conflicts if multiple edits happen
     const base = basename(relPath);
     const ts = Date.now();
     const oldPath = join(tmpDir, `${base}-${ts}.old`);
@@ -118,6 +176,7 @@ export default function slowMode(pi: ExtensionAPI) {
     writeFileSync(oldPath, oldText, "utf-8");
     writeFileSync(newPath, newText, "utf-8");
 
+    // Show review UI — user can view inline or press Ctrl+O for external
     const approved = await showReview(ctx, {
       operation: "EDIT",
       filePath: relPath,
@@ -127,27 +186,50 @@ export default function slowMode(pi: ExtensionAPI) {
       newPath,
     });
 
+    // Clean up staged files after decision
     cleanup(oldPath);
     cleanup(newPath);
 
+    // Block the tool if user rejected
     if (!approved) {
       return { block: true, reason: "User rejected the edit in slow mode review." };
     }
+
+    // Approved: return undefined → tool proceeds normally
   }
 
   ////----------------------------------------
   ///     Review UI
   //------------------------------------------
 
+  /**
+   * Options for the review UI component
+   */
   interface ReviewOptions {
-    operation: "WRITE" | "EDIT";
-    filePath: string;
-    stagePath: string;
-    body: string;
-    oldPath?: string;
-    newPath?: string;
+    operation: "WRITE" | "EDIT";   // Type of change being reviewed
+    filePath: string;               // Relative path to the file
+    stagePath: string;              // Path to staged file (for writes and as fallback)
+    body: string;                   // Content to display (file content or diff)
+    oldPath?: string;               // Staged old file (edits only)
+    newPath?: string;               // Staged new file (edits only)
   }
 
+  /**
+   * Show interactive review UI
+   *
+   * Displays the proposed change with scrollable preview and key bindings:
+   * - Enter: approve change
+   * - Esc: reject change
+   * - Ctrl+O: open in external viewer (delta/vim/diff)
+   * - k/↑: scroll up one line
+   * - j/↓: scroll down one line
+   * - u/PgUp: scroll up half page (15 lines)
+   * - d/PgDn: scroll down half page (15 lines)
+   * - gg: go to top
+   * - G: go to bottom
+   *
+   * @returns Promise<boolean> - true if approved, false if rejected
+   */
   async function showReview(
     ctx: ExtensionContext,
     opts: ReviewOptions,
@@ -155,21 +237,37 @@ export default function slowMode(pi: ExtensionAPI) {
     const { matchesKey, Key } = await import("@mariozechner/pi-tui");
 
     return ctx.ui.custom<boolean>((tui, theme, _kb, done) => {
+      // Scroll state
       let scrollOffset = 0;
       let cachedLines: string[] | undefined;
+
+      // Content split into lines for scrolling
       const bodyLines = opts.body.split("\n");
-      const maxVisible = 30;
+      const maxVisible = 30;  // Show up to 30 lines at once
+
+      // Max scroll position (clamp to avoid scrolling past content)
       const maxScroll = Math.max(0, bodyLines.length - 5);
 
+      /**
+       * Clamp scroll offset to valid range
+       */
       function clampScroll(offset: number) {
         scrollOffset = Math.max(0, Math.min(maxScroll, offset));
       }
 
+      /**
+       * Invalidate render cache and request re-render
+       */
       function refresh() {
         cachedLines = undefined;
         tui.requestRender();
       }
 
+      /**
+       * Open staged files in external viewer
+       * For edits: opens delta/vim diff
+       * For writes: opens file in $VISUAL/$EDITOR
+       */
       function openExternal() {
         try {
           if (opts.operation === "EDIT" && opts.oldPath && opts.newPath) {
@@ -179,86 +277,141 @@ export default function slowMode(pi: ExtensionAPI) {
           }
         } catch {
           // External viewer failed — stay in inline review
+          // (e.g., viewer not found, user closed viewer)
         }
         refresh();
       }
 
+      /**
+       * Handle keyboard input
+       */
       function handleInput(data: string) {
+        // Approve change
         if (matchesKey(data, Key.enter)) {
           done(true);
           return;
         }
+
+        // Reject change
         if (matchesKey(data, Key.escape)) {
           done(false);
           return;
         }
-        // Ctrl+O — open in external viewer
+
+        // Open in external viewer
         if (matchesKey(data, Key.ctrl("o"))) {
           openExternal();
           return;
         }
-        if (matchesKey(data, Key.up)) {
+
+        // Vim-style navigation: k or ↑ - scroll up one line
+        if (data === "k" || matchesKey(data, Key.up)) {
           clampScroll(scrollOffset - 1);
           refresh();
           return;
         }
-        if (matchesKey(data, Key.down)) {
+
+        // Vim-style navigation: j or ↓ - scroll down one line
+        if (data === "j" || matchesKey(data, Key.down)) {
           clampScroll(scrollOffset + 1);
           refresh();
           return;
         }
-        if (matchesKey(data, Key.pageUp)) {
-          clampScroll(scrollOffset - 20);
+
+        // Vim-style navigation: u or PgUp - scroll up half page (15 lines)
+        if (data === "u" || matchesKey(data, Key.pageUp)) {
+          clampScroll(scrollOffset - 15);
           refresh();
           return;
         }
-        if (matchesKey(data, Key.pageDown)) {
-          clampScroll(scrollOffset + 20);
+
+        // Vim-style navigation: d or PgDn - scroll down half page (15 lines)
+        if (data === "d" || matchesKey(data, Key.pageDown)) {
+          clampScroll(scrollOffset + 15);
+          refresh();
+          return;
+        }
+
+        // Vim-style navigation: gg - go to top
+        if (data === "g") {
+          // Wait for second 'g'
+          const timeout = setTimeout(() => {
+            // Single 'g' pressed — do nothing
+          }, 500);
+
+          tui.once("data", (nextData: string) => {
+            clearTimeout(timeout);
+            if (nextData === "g") {
+              scrollOffset = 0;
+              refresh();
+            }
+          });
+          return;
+        }
+
+        // Vim-style navigation: G - go to bottom
+        if (data === "G") {
+          scrollOffset = maxScroll;
           refresh();
           return;
         }
       }
 
+      /**
+       * Render the review UI
+       */
       function render(width: number): string[] {
+        // Return cached lines if available (performance optimization)
         if (cachedLines) return cachedLines;
 
         const lines: string[] = [];
         const add = (s: string) => lines.push(truncateToWidth(s, width));
 
+        // Top separator
         add(theme.fg("accent", "─".repeat(width)));
 
-        // Header
+        // Operation label (NEW FILE or EDIT)
         const opLabel =
           opts.operation === "WRITE"
             ? theme.fg("warning", " NEW FILE")
             : theme.fg("accent", " EDIT (diff)");
         add(opLabel);
+
+        // File path
         add(` ${theme.fg("accent", opts.filePath)}`);
         lines.push("");
 
-        // Body with scroll
+        // Scrollable content/diff window
         const visible = bodyLines.slice(
           scrollOffset,
           scrollOffset + maxVisible,
         );
         for (const line of visible) {
           if (opts.operation === "EDIT") {
+            // Syntax highlighting for unified diff format
             if (line.startsWith("---") || line.startsWith("+++")) {
+              // File headers — dim
               add(` ${theme.fg("dim", line)}`);
             } else if (line.startsWith("@@")) {
+              // Hunk headers — accent
               add(` ${theme.fg("accent", line)}`);
             } else if (line.startsWith("+")) {
+              // Added lines — green
               add(` ${theme.fg("success", line)}`);
             } else if (line.startsWith("-")) {
+              // Removed lines — red
               add(` ${theme.fg("error", line)}`);
             } else {
+              // Context lines — normal text
               add(` ${theme.fg("text", line)}`);
             }
           } else {
+            // Write operation: no syntax highlighting, just plain text
             add(` ${theme.fg("text", line)}`);
           }
         }
 
+        // Scroll indicator (show if content doesn't fit in window)
         if (bodyLines.length > maxVisible) {
           const total = bodyLines.length;
           const end = Math.min(scrollOffset + maxVisible, total);
@@ -271,15 +424,21 @@ export default function slowMode(pi: ExtensionAPI) {
         }
 
         lines.push("");
+
+        // Key binding hints
         add(
-          theme.fg("dim", " Enter approve • Esc reject • Ctrl+O open external"),
+          theme.fg("dim", " Enter approve • Esc reject • Ctrl+O external • j/k u/d gg/G scroll"),
         );
+
+        // Bottom separator
         add(theme.fg("accent", "─".repeat(width)));
 
+        // Cache the rendered lines
         cachedLines = lines;
         return lines;
       }
 
+      // Return TUI component interface
       return {
         render,
         invalidate: () => {
@@ -294,43 +453,80 @@ export default function slowMode(pi: ExtensionAPI) {
   ///     External viewers
   //------------------------------------------
 
+  /**
+   * Open old/new files in an external diff viewer
+   *
+   * Discovery order:
+   * 1. delta (best terminal diff experience)
+   * 2. nvim -d (if nvim available)
+   * 3. vim -d (if vim available)
+   * 4. diff (fallback to plain diff)
+   *
+   * If no diff tool found, falls back to opening just the new file.
+   *
+   * @param oldPath - Path to staged old version
+   * @param newPath - Path to staged new version
+   * @param label - File label (unused currently, for future use)
+   */
   function openExternalDiff(oldPath: string, newPath: string, label: string) {
     const diffTool = findDiffTool();
+
+    // No diff tool found — fall back to opening just the new file
     if (!diffTool) {
-      // Fall back to opening just the new file
       openExternalFile(newPath);
       return;
     }
 
     const { cmd, args } = diffTool;
+
+    // Configure tool-specific arguments
     if (cmd === "delta") {
+      // delta: render to pager with side-by-side layout
       args.push("--paging", "always", "--side-by-side", oldPath, newPath);
     } else if (cmd === "nvim" || cmd === "vim") {
+      // vim/nvim: open in diff mode
       args.push("-d", oldPath, newPath);
     } else {
-      // Generic: assume it takes two files
+      // Generic diff tool: assume it takes two file arguments
       args.push(oldPath, newPath);
     }
 
+    // Execute synchronously — blocks until user closes the viewer
+    // stdio: "inherit" attaches to the terminal
     execFileSync(cmd, args, { stdio: "inherit" });
   }
 
+  /**
+   * Open a single file in the user's preferred editor
+   *
+   * Uses $VISUAL, $EDITOR, or falls back to 'less' for viewing.
+   */
   function openExternalFile(filePath: string) {
     const editor = process.env.VISUAL || process.env.EDITOR || "less";
     execFileSync(editor, [filePath], { stdio: "inherit" });
   }
 
+  /**
+   * Find an available diff tool on the system
+   *
+   * @returns { cmd, args } if found, null otherwise
+   */
   function findDiffTool(): { cmd: string; args: string[] } | null {
     // Prefer delta for nice terminal diff, then vimdiff, then plain diff
     const candidates = ["delta", "nvim", "vim", "diff"];
+
     for (const cmd of candidates) {
       try {
+        // Check if command exists in PATH
         execFileSync("which", [cmd], { stdio: "ignore" });
         return { cmd, args: [] };
       } catch {
+        // Command not found, try next candidate
         continue;
       }
     }
+
+    // No diff tool found
     return null;
   }
 
@@ -338,6 +534,25 @@ export default function slowMode(pi: ExtensionAPI) {
   ///     Diff generation
   //------------------------------------------
 
+  /**
+   * Generate a unified diff from old and new text
+   *
+   * Format:
+   * --- a/file/path
+   * +++ b/file/path
+   * @@ -1,N +1,M @@
+   * -old line
+   * +new line
+   *
+   * This is a simplified diff that shows all old lines as removed
+   * and all new lines as added. For accurate line-by-line diffs
+   * with context, a proper LCS algorithm would be needed.
+   *
+   * @param filePath - Relative file path
+   * @param oldText - Original text
+   * @param newText - Modified text
+   * @returns Unified diff string
+   */
   function generateUnifiedDiff(
     filePath: string,
     oldText: string,
@@ -347,12 +562,20 @@ export default function slowMode(pi: ExtensionAPI) {
     const newLines = newText.split("\n");
 
     const lines: string[] = [];
+
+    // Unified diff header
     lines.push(`--- a/${filePath}`);
     lines.push(`+++ b/${filePath}`);
+
+    // Hunk header: @@ -start,count +start,count @@
     lines.push(`@@ -1,${oldLines.length} +1,${newLines.length} @@`);
+
+    // Old lines prefixed with '-'
     for (const line of oldLines) {
       lines.push(`-${line}`);
     }
+
+    // New lines prefixed with '+'
     for (const line of newLines) {
       lines.push(`+${line}`);
     }
@@ -364,15 +587,23 @@ export default function slowMode(pi: ExtensionAPI) {
   ///     Helpers
   //------------------------------------------
 
+  /**
+   * Ensure a directory exists, creating parent directories as needed
+   */
   function ensureDir(dir: string) {
     mkdirSync(dir, { recursive: true });
   }
 
+  /**
+   * Delete a file, ignoring errors
+   * (Used for cleaning up staged files after review)
+   */
   function cleanup(path: string) {
     try {
       unlinkSync(path);
     } catch {
       // Ignore — tmp cleanup is best-effort
+      // File may not exist or may be in use
     }
   }
 }
