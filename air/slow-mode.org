@@ -12,12 +12,12 @@ When the LLM makes code changes, they are applied immediately. This is efficient
 
 ** Goals
 - Intercept ~write~ tool calls: stage new file content in a tmp directory, show it, let user approve/reject.
-- Intercept ~edit~ tool calls: stage old/new files in a tmp directory, generate a unified diff, show it, let user approve/reject.
+- Intercept ~edit~ tool calls: stage old/new files in a tmp directory, open in external diff viewer by default (delta/vim/diff), let user approve/reject.
+- Fallback to inline TUI diff if no external viewer available.
 - On approve: proceed with the original tool execution.
 - On reject: block the tool call with a reason (using ~ToolCallEventResult.block~).
 - Toggle slow mode on/off via a ~/slow-mode~ command.
 - Show status bar indicator when slow mode is active.
-- Allow opening staged files in an external diff viewer via Ctrl+O.
 
 ** Non-Goals
 - Intercepting ~bash~ commands (too broad, user already has confirmation via pi's built-in mechanism).
@@ -48,9 +48,9 @@ Use the ~tool_call~ event, which fires before tool execution. The handler return
 1. On ~tool_call~ where ~toolName === "edit"~:
    - Extract ~path~, ~oldText~, ~newText~ from ~event.input~.
    - Stage both old and new text as separate files (~<name>-<ts>.old~ / ~<name>-<ts>.new~) in the tmp directory.
-   - Generate a unified diff for inline display.
-   - Show a review UI displaying the diff.
-   - User presses Enter to approve, Esc to reject, or Ctrl+O to open in an external diff viewer.
+   - Try to open in external diff viewer (delta → nvim → vim → diff) by default.
+   - If external viewer available: user reviews changes, closes viewer, then gets Yes/No confirmation prompt.
+   - If no external viewer: show inline TUI diff with vim-style navigation (j/k, u/d, gg/G, Ctrl+O to try external).
 2. Same approve/reject flow as write.
 3. Clean up both staged files after decision.
 
@@ -63,12 +63,20 @@ Register ~/slow-mode~ command:
 
 ** UI Design
 
+*** External Diff Viewer (Edit operations - default)
+- Opens delta/vim/diff automatically when available
+- User reviews changes in external tool
+- After closing external viewer, shows simple confirmation:
+  - "Apply changes to <file>?" with Yes/No options
+
+*** Inline TUI Review (Fallback for edits, default for writes)
 Review component (via ~ctx.ui.custom~):
 - Top: separator line
 - File path in accent colour
 - Operation label: "NEW FILE" or "EDIT (diff)"
-- Content/diff body (scrollable if long)
-- Bottom: "Enter to approve • Esc to reject"
+- Content/diff body (scrollable with vim-style navigation: j/k, u/d, gg/G)
+- Ctrl+O to open in external viewer
+- Bottom: key binding hints
 - Bottom: separator line
 
 Keep it simple — no tabs, no multi-select. One change at a time, inline with the tool call flow.
@@ -78,35 +86,59 @@ Keep it simple — no tabs, no multi-select. One change at a time, inline with t
 ** Staging Directory
 - ~/tmp/pi-slow-mode-<pid>/~ to avoid collisions between sessions.
 - Created on first use, cleaned up lazily (OS handles ~/tmp~ cleanup).
-- Mirror the relative path structure: if writing ~src/foo.ts~, stage at ~/tmp/pi-slow-mode-<pid>/src/foo.ts~.
+- For writes: mirror the relative path structure (e.g., ~src/foo.ts~ → ~/tmp/pi-slow-mode-<pid>/src/foo.ts~).
+- For edits: stage old/new as ~<filename>-<timestamp>.old~ / ~.new~ in the tmp directory.
 
 ** Diff Generation
-- For edit: simple unified diff format showing old/new text with file path context.
-- Use a minimal inline diff function — no external dependency needed.
-- Write patch to ~/tmp/pi-slow-mode-<pid>/<filename>-<timestamp>.patch~.
+- Uses the ~diff~ npm package (Myers algorithm) to generate proper unified diffs with context lines.
+- Produces output similar to ~git diff~ and pi's own edit tool result rendering.
+- Shows only changed sections with surrounding context (3 lines), not all old lines removed then all new lines added.
 
 ** Non-Interactive Mode
 - If ~!ctx.hasUI~, slow mode is a no-op (all changes proceed immediately).
-- The ~/slowmode~ command should notify that it requires interactive mode.
+- The ~/slow-mode~ command is available only in interactive mode.
+
+** Vim-Style Navigation
+- Inline TUI diff supports vim-style keybindings for navigation:
+  - ~j/k~ — scroll down/up one line
+  - ~u/d~ — scroll up/down half page (15 lines)
+  - ~gg~ — jump to top (double-tap g within 500ms)
+  - ~G~ — jump to bottom
+  - Arrow keys and PgUp/PgDn also supported for users who prefer those
+
+** Dependencies
+- ~diff~ npm package (v7+) for proper unified diff generation
+- Located in extension directory with its own ~package.json~
 
 ** Test Plan
-- Manual testing via ~/slowmode~ toggle.
-- Test with ~write~ of a new file — verify staging + review.
-- Test with ~edit~ of an existing file — verify diff display + review.
+- Manual testing via ~/slow-mode~ toggle.
+- Test with ~write~ of a new file — verify staging + inline review.
+- Test with ~edit~ of an existing file:
+  - Verify external diff viewer opens by default (delta/vim/diff)
+  - Verify Yes/No confirmation after closing viewer
+  - Verify fallback to inline diff if no external viewer available
+  - Verify Ctrl+O from inline view opens external viewer
+  - Verify vim-style navigation (j/k, u/d, gg/G) in inline view
 - Test reject flow — verify tool is blocked and LLM gets the rejection message.
 - Test with ~ctx.hasUI === false~ — verify pass-through.
 
 * Drawbacks
 - Adds friction to every write/edit when enabled — only useful when caution is needed.
-- Reviewing large diffs in the TUI may be awkward (but scrolling helps).
+- External diff viewer blocks the terminal session until closed — may be disruptive for rapid iteration.
+- Users without delta/vim may get a suboptimal inline diff experience (though vim-style navigation helps).
 
 * Alternatives
 - Could intercept at ~tool_result~ level and revert — but that's more complex and leaves a window where bad changes exist on disk.
 - Could use ~ctx.ui.confirm~ instead of ~ctx.ui.custom~ — simpler but less informative (no diff preview).
+- Could try to import pi's internal ~generateDiffString~ — but it's not in the public API and import paths break in extension context.
 
 * History
 - 2026-02-01: Initial specification drafted.
 - 2026-02-01: Implementation complete — slow-mode.ts created.
+- 2026-02-02: Command renamed from ~/slowmode~ to ~/slow-mode~.
+- 2026-02-02: Added Ctrl+O to open external diff viewer.
+- 2026-02-02: Added vim-style navigation (j/k, u/d, gg/G) to inline diff view.
+- 2026-02-02: Changed default behavior for edits to open external diff viewer (delta/vim/diff) first, with inline TUI as fallback.
 
 * References
 - ~ToolCallEventResult.block~ — upstream mechanism for rejecting tool calls.

@@ -21,6 +21,7 @@ import type {
   ExtensionContext,
 } from "@mariozechner/pi-coding-agent";
 import { Text, truncateToWidth } from "@mariozechner/pi-tui";
+import { createTwoFilesPatch } from "diff";
 
 export default function slowMode(pi: ExtensionAPI) {
   // State: whether slow mode is currently enabled
@@ -144,11 +145,12 @@ export default function slowMode(pi: ExtensionAPI) {
    *
    * Flow:
    * 1. Stage both old and new text as separate files
-   * 2. Generate unified diff for inline display
-   * 3. Show review UI with the diff (user can Ctrl+O to external viewer)
-   * 4. User approves → return undefined (tool proceeds)
-   * 5. User rejects → return { block: true } (tool aborted)
-   * 6. Cleanup both staged files
+   * 2. Try to open in external diff viewer (delta/vim/diff) by default
+   * 3. If external viewer not available, show inline TUI diff
+   * 4. User reviews changes, then approves/rejects
+   * 5. User approves → return undefined (tool proceeds)
+   * 6. User rejects → return { block: true } (tool aborted)
+   * 7. Cleanup both staged files
    */
   async function reviewEdit(
     input: Record<string, unknown>,
@@ -163,9 +165,6 @@ export default function slowMode(pi: ExtensionAPI) {
 
     const relPath = resolvePath(ctx, filePath);
 
-    // Generate inline diff for TUI display
-    const diff = generateUnifiedDiff(relPath, oldText, newText);
-
     // Stage old and new files for external diff viewer
     // Timestamped to avoid conflicts if multiple edits happen
     const base = basename(relPath);
@@ -176,15 +175,45 @@ export default function slowMode(pi: ExtensionAPI) {
     writeFileSync(oldPath, oldText, "utf-8");
     writeFileSync(newPath, newText, "utf-8");
 
-    // Show review UI — user can view inline or press Ctrl+O for external
-    const approved = await showReview(ctx, {
-      operation: "EDIT",
-      filePath: relPath,
-      stagePath: newPath,
-      body: diff,
-      oldPath,
-      newPath,
-    });
+    let approved: boolean;
+
+    // Try to open in external diff viewer first (preferred)
+    const diffTool = findDiffTool();
+    if (diffTool) {
+      try {
+        // Open external diff viewer — blocks until user closes it
+        openExternalDiff(oldPath, newPath, relPath);
+        
+        // After viewer closes, ask user for approval decision
+        const choice = await ctx.ui.confirm(
+          `Apply changes to ${relPath}?`,
+          ["Yes", "No"],
+        );
+        approved = choice === "Yes";
+      } catch {
+        // External viewer failed — fall back to inline diff
+        const diff = generateUnifiedDiff(relPath, oldText, newText);
+        approved = await showReview(ctx, {
+          operation: "EDIT",
+          filePath: relPath,
+          stagePath: newPath,
+          body: diff,
+          oldPath,
+          newPath,
+        });
+      }
+    } else {
+      // No external diff tool available — show inline TUI diff
+      const diff = generateUnifiedDiff(relPath, oldText, newText);
+      approved = await showReview(ctx, {
+        operation: "EDIT",
+        filePath: relPath,
+        stagePath: newPath,
+        body: diff,
+        oldPath,
+        newPath,
+      });
+    }
 
     // Clean up staged files after decision
     cleanup(oldPath);
@@ -247,6 +276,9 @@ export default function slowMode(pi: ExtensionAPI) {
 
       // Max scroll position (clamp to avoid scrolling past content)
       const maxScroll = Math.max(0, bodyLines.length - 5);
+
+      // Track last 'g' press for gg binding
+      let lastGPress = 0;
 
       /**
        * Clamp scroll offset to valid range
@@ -334,18 +366,15 @@ export default function slowMode(pi: ExtensionAPI) {
 
         // Vim-style navigation: gg - go to top
         if (data === "g") {
-          // Wait for second 'g'
-          const timeout = setTimeout(() => {
-            // Single 'g' pressed — do nothing
-          }, 500);
-
-          tui.once("data", (nextData: string) => {
-            clearTimeout(timeout);
-            if (nextData === "g") {
-              scrollOffset = 0;
-              refresh();
-            }
-          });
+          const now = Date.now();
+          // Check if this is a double 'g' within 500ms
+          if (now - lastGPress < 500) {
+            scrollOffset = 0;
+            refresh();
+            lastGPress = 0; // Reset
+          } else {
+            lastGPress = now;
+          }
           return;
         }
 
@@ -535,18 +564,13 @@ export default function slowMode(pi: ExtensionAPI) {
   //------------------------------------------
 
   /**
-   * Generate a unified diff from old and new text
+   * Generate a unified diff from old and new text using the 'diff' library
    *
-   * Format:
-   * --- a/file/path
-   * +++ b/file/path
-   * @@ -1,N +1,M @@
-   * -old line
-   * +new line
+   * Uses the Myers diff algorithm to produce a proper unified diff with
+   * context lines, showing only the changed sections rather than treating
+   * all old lines as removed and all new lines as added.
    *
-   * This is a simplified diff that shows all old lines as removed
-   * and all new lines as added. For accurate line-by-line diffs
-   * with context, a proper LCS algorithm would be needed.
+   * This produces similar output to git diff and pi's own diff rendering.
    *
    * @param filePath - Relative file path
    * @param oldText - Original text
@@ -558,29 +582,15 @@ export default function slowMode(pi: ExtensionAPI) {
     oldText: string,
     newText: string,
   ): string {
-    const oldLines = oldText.split("\n");
-    const newLines = newText.split("\n");
-
-    const lines: string[] = [];
-
-    // Unified diff header
-    lines.push(`--- a/${filePath}`);
-    lines.push(`+++ b/${filePath}`);
-
-    // Hunk header: @@ -start,count +start,count @@
-    lines.push(`@@ -1,${oldLines.length} +1,${newLines.length} @@`);
-
-    // Old lines prefixed with '-'
-    for (const line of oldLines) {
-      lines.push(`-${line}`);
-    }
-
-    // New lines prefixed with '+'
-    for (const line of newLines) {
-      lines.push(`+${line}`);
-    }
-
-    return lines.join("\n");
+    return createTwoFilesPatch(
+      filePath,
+      filePath,
+      oldText,
+      newText,
+      undefined,
+      undefined,
+      { context: 3 },
+    );
   }
 
   ////----------------------------------------
