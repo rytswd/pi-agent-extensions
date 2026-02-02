@@ -191,10 +191,6 @@ Tab/←→ navigate • ↑↓ select • Enter confirm • Esc cancel
 - Confirmations with context ("Delete these 15 files? Yes/No")
 - Multi-step workflows
 
-#+begin_quote
-💡 Based on the original implementation by [[https://github.com/Mic92][Mic92]] from [[https://github.com/Mic92/dotfiles/blob/main/home/.pi/agent/extensions/questionnaire.ts][Mic92/dotfiles]]. Thanks Mic92!
-#+end_quote
-
 #+html:</details>
 
 *** direnv — Auto-Load Environment Variables
@@ -331,7 +327,7 @@ See the [[https://github.com/mariozechner/pi][pi documentation]] for the full ex
 
 ** 🙏 Acknowledgements
 
-- [[https://github.com/Mic92][Mic92]] — Original direnv ([[https://github.com/Mic92/dotfiles/blob/main/home/.pi/agent/extensions/direnv.ts][source]]) and questionnaire ([[https://github.com/Mic92/dotfiles/blob/main/home/.pi/agent/extensions/questionnaire.ts][source]]) implementations
+- [[https://github.com/Mic92][Mic92]] — Original direnv implementation ([[https://github.com/Mic92/dotfiles/blob/main/home/.pi/agent/extensions/direnv.ts][source]])
 - [[https://github.com/mariozechner][Mario Zechner]] — pi coding agent
 
 ** 📄 License
