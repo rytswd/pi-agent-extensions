@@ -23,6 +23,7 @@
 ```
 ~/.pi/agent/extensions/
 ├── direnv.ts           # Direnv integration extension
+├── questionnaire.ts    # Multi-question tool for LLM-driven user input
 ├── slow-mode.ts        # Review gate for write/edit tool calls
 ├── AGENTS.md           # Agent context for AI assistants
 ├── README.org          # Project README
@@ -43,6 +44,12 @@ Loads [direnv](https://direnv.net/) environment variables into pi sessions. Runs
 - **Events**: `session_start`, `tool_result` (bash only)
 - **Status bar**: `direnv …` (running) · `direnv ✓` (loaded) · `direnv ✗` (error)
 
+### questionnaire.ts
+Registers a `questionnaire` tool that the LLM can call to ask the user single or multiple-choice questions. Supports tab navigation for multi-question flows, free-text "type something" option, and a submit review screen.
+
+- **Mechanism**: `pi.registerTool()` — LLM decides when to call it
+- **UI**: `ctx.ui.custom()` interactive component with keyboard navigation
+
 ### slow-mode.ts
 Intercepts `write` and `edit` tool calls to let the user review proposed changes before they are applied. New files are staged in a tmp directory; edits stage old/new files and display a unified diff. Toggle with `/slow-mode`. Use Ctrl+O to open in an external diff viewer.
 
@@ -54,6 +61,6 @@ Intercepts `write` and `edit` tool calls to let the user review proposed changes
 
 ## Current Focus
 
-This project is in its early stages. The direnv extension is complete and functional. Future extensions will be added as needs arise.
+The direnv and questionnaire extensions are complete. Slow mode is being implemented — see `air/slow-mode.org` for the specification.
 
 Use `airctl status` to see planning documents and their states.

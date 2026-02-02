@@ -23,21 +23,65 @@ These extensions live in =~/.pi/agent/extensions/= for global auto-discovery —
 
 *** slow-mode
 
-Intercepts ~write~ and ~edit~ tool calls, letting you review proposed changes before they are applied. New files are staged in a temporary directory; edits stage old/new versions and display an inline diff.
+Intercepts ~write~ and ~edit~ tool calls, letting you review proposed changes before they are applied. Write operations show an inline preview; edit operations open in an external diff viewer by default (delta/vim/diff), with inline TUI as fallback.
 
 *Features:*
-- Inline diff preview for edit operations with contextual colouring
-- Ctrl+O opens staged files in an external diff viewer (delta/vim/diff auto-detected)
-- Scrollable preview for large changes (↑↓/PgUp/PgDn)
+- *External diff viewer by default* for edits — opens delta/vim/diff automatically, shows Yes/No confirmation after review
+- *Proper unified diff* using Myers algorithm (via ~diff~ npm package) — shows only changed sections with context, not all old lines removed then all new added
+- *Vim-style navigation* in inline TUI — j/k, u/d, gg/G for scrolling
+- *Ctrl+O* from inline view opens external diff viewer
 - Toggle command: ~/slow-mode~
 - Status bar indicator: ~slow ■~ (active) or cleared (inactive)
 - No-op in non-interactive mode (headless sessions bypass the review)
 
-*Key bindings:*
+*Key bindings (inline TUI):*
 - ~Enter~ - approve changes
 - ~Esc~ - reject changes
 - ~Ctrl+O~ - open in external diff viewer
-- ~↑↓/PgUp/PgDn~ - scroll preview
+- ~j/↓~ - scroll down one line
+- ~k/↑~ - scroll up one line
+- ~d/PgDn~ - scroll down half page (15 lines)
+- ~u/PgUp~ - scroll up half page (15 lines)
+- ~gg~ - jump to top (double-tap g)
+- ~G~ - jump to bottom
+
+*Requirements:*
+- ~diff~ npm package (installed in extension directory)
+- Optional: ~delta~, ~nvim~, or ~vim~ for better external diff viewing
+
+*** questionnaire
+
+A tool that the LLM can invoke to ask you single or multiple-choice questions. Provides an interactive TUI for collecting structured input from the user during agent execution.
+
+*Features:*
+- *Single question mode* — simple option list with keyboard navigation
+- *Multi-question mode* — tab bar for navigating between questions, with completion indicators (■/□)
+- *Free-text input* — "Type something..." option allows custom responses
+- *Submit review screen* — shows all answers before final confirmation
+- *Autocomplete support* — integrates with pi's TUI autocomplete system
+- Custom ~renderCall~ and ~renderResult~ for clean tool display in chat history
+
+*Key bindings (single question):*
+- ~↑↓~ - navigate options
+- ~Enter~ - select option
+- ~Esc~ - cancel
+
+*Key bindings (multi-question):*
+- ~Tab/←→~ - navigate between question tabs
+- ~↑↓~ - navigate options within current question
+- ~Enter~ - confirm answer (advances to next question or submit screen)
+- ~Esc~ - cancel questionnaire
+
+*Usage:*
+The LLM calls this tool when it needs structured input. For example:
+- Asking which file to edit when multiple matches exist
+- Confirming destructive operations with Yes/No
+- Collecting configuration preferences before code generation
+- Multi-step wizards (e.g., "Choose framework" → "Choose features" → "Confirm")
+
+#+begin_quote
+💡 The questionnaire extension is inspired by patterns from [[https://github.com/Mic92][Mic92]]'s pi extensions. Thanks Mic92!
+#+end_quote
 
 *** direnv
 
@@ -83,6 +127,10 @@ You'll see the direnv status indicator in the status bar once it kicks in.
 #+begin_example
 ~/.pi/agent/extensions/
 ├── direnv.ts           # Direnv integration extension
+├── questionnaire.ts    # Multi-question tool for LLM-driven user input
+├── slow-mode.ts        # Review gate for write/edit tool calls
+├── package.json        # npm dependencies for extensions (diff package)
+├── node_modules/       # npm packages (diff for slow-mode)
 ├── AGENTS.md           # Agent context for AI assistants
 ├── air/                # Air documentation (development planning)
 │   ├── context/        # Project context files
