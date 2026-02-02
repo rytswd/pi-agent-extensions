@@ -21,77 +21,218 @@ These extensions live in =~/.pi/agent/extensions/= for global auto-discovery —
 
 ** ✨ Extensions
 
-*** slow-mode
+*** slow-mode — Review Changes Before Applying
 
-Intercepts ~write~ and ~edit~ tool calls, letting you review proposed changes before they are applied. Write operations show an inline preview; edit operations open in an external diff viewer by default (delta/vim/diff), with inline TUI as fallback.
+Intercepts =write= and =edit= tool calls, letting you review and approve/reject changes before they hit disk.
+
+#+html:<details>
+#+html:<summary><b>🎬 What it looks like</b></summary>
+#+html:<br>
+
+*For edits:* Opens delta/vim diff viewer by default
+
+#+begin_example
+# Delta opens in your terminal showing side-by-side diff
+# After you close delta, you get a confirmation prompt:
+
+Apply changes to air/slow-mode.org?
+  > Yes
+    No
+#+end_example
+
+*For writes (or if no external viewer):* Shows inline TUI diff
+
+#+begin_example
+────────────────────────────────────────────────────────────────
+ EDIT (diff)
+ slow-mode.ts
+
+ @@ -28,7 +28,9 @@
+  export default function slowMode(pi: ExtensionAPI) {
+ +  // State: whether slow mode is currently enabled
+    let enabled = false;
+ +
+ +  // Staging directory for review
+    const tmpDir = `/tmp/pi-slow-mode-${process.pid}`;
+
+ (lines 1–30 of 150 — j/k u/d gg/G scroll)
+
+ Enter approve • Esc reject • Ctrl+O external • j/k u/d gg/G scroll
+────────────────────────────────────────────────────────────────
+#+end_example
+
+#+html:</details>
+
+#+html:<details>
+#+html:<summary><b>📋 Features & Usage</b></summary>
+#+html:<br>
 
 *Features:*
-- *External diff viewer by default* for edits — opens delta/vim/diff automatically, shows Yes/No confirmation after review
-- *Proper unified diff* using Myers algorithm (via ~diff~ npm package) — shows only changed sections with context, not all old lines removed then all new added
-- *Vim-style navigation* in inline TUI — j/k, u/d, gg/G for scrolling
-- *Ctrl+O* from inline view opens external diff viewer
-- Toggle command: ~/slow-mode~
-- Status bar indicator: ~slow ■~ (active) or cleared (inactive)
-- No-op in non-interactive mode (headless sessions bypass the review)
+- *External diff viewer by default* for edits — opens delta/vim/diff, shows confirmation after review
+- *Proper unified diff* using Myers algorithm — shows only changed sections with context
+- *Vim-style navigation* in inline TUI — =j/k=, =u/d=, =gg/G= for scrolling
+- =Ctrl+O= from inline view opens external diff viewer
+- Toggle command: =/slow-mode=
+- Status bar: =slow ■= (active) or cleared (inactive)
 
 *Key bindings (inline TUI):*
-- ~Enter~ - approve changes
-- ~Esc~ - reject changes
-- ~Ctrl+O~ - open in external diff viewer
-- ~j/↓~ - scroll down one line
-- ~k/↑~ - scroll up one line
-- ~d/PgDn~ - scroll down half page (15 lines)
-- ~u/PgUp~ - scroll up half page (15 lines)
-- ~gg~ - jump to top (double-tap g)
-- ~G~ - jump to bottom
+| Key           | Action                       |
+|---------------+------------------------------|
+| =Enter=       | Approve changes              |
+| =Esc=         | Reject changes               |
+| =Ctrl+O=      | Open in external diff viewer |
+| =j= / =↓=     | Scroll down one line         |
+| =k= / =↑=     | Scroll up one line           |
+| =d= / =PgDn=  | Scroll down half page        |
+| =u= / =PgUp=  | Scroll up half page          |
+| =gg=          | Jump to top (double-tap g)   |
+| =G=           | Jump to bottom               |
 
 *Requirements:*
-- ~diff~ npm package (installed in extension directory)
-- Optional: ~delta~, ~nvim~, or ~vim~ for better external diff viewing
+- =diff= npm package (automatically installed via =npm install= — see Quick Start)
+- Optional: =delta=, =nvim=, or =vim= for external diff viewing
 
-*** questionnaire
+*Note:* The =diff= package provides proper unified diff generation (Myers algorithm). Without it, slow-mode will fail to load.
 
-A tool that the LLM can invoke to ask you single or multiple-choice questions. Provides an interactive TUI for collecting structured input from the user during agent execution.
+#+html:</details>
+
+*** questionnaire — Interactive Multi-Question Tool
+
+A tool the LLM can call to ask you single or multiple-choice questions with tab-based navigation.
+
+#+html:<details>
+#+html:<summary><b>🎬 What it looks like</b></summary>
+#+html:<br>
+
+*Multi-question flow:*
+
+#+begin_example
+────────────────────────────────────────────────────────────────
+← □ Framework  □ TypeScript  □ Styling  ✓ Submit →
+
+Which framework would you like to use?
+
+> 1. React
+     Component-based library
+  2. Vue
+     Progressive framework
+  3. Svelte
+     Compiled framework
+  4. Type something.
+
+Tab/←→ navigate • ↑↓ select • Enter confirm • Esc cancel
+────────────────────────────────────────────────────────────────
+#+end_example
+
+After selecting "React" and pressing Enter:
+
+#+begin_example
+────────────────────────────────────────────────────────────────
+← ■ Framework  □ TypeScript  □ Styling  ✓ Submit →
+
+Do you want to use TypeScript?
+
+> 1. Yes
+  2. No
+
+Tab/←→ navigate • ↑↓ select • Enter confirm • Esc cancel
+────────────────────────────────────────────────────────────────
+#+end_example
+
+Final submit screen shows all answers:
+
+#+begin_example
+────────────────────────────────────────────────────────────────
+← ■ Framework  ■ TypeScript  ■ Styling  ✓ Submit →
+
+Ready to submit
+
+Framework: 1. React
+TypeScript: 1. Yes
+Styling: 1. Tailwind CSS
+
+Press Enter to submit
+
+Tab/←→ navigate • ↑↓ select • Enter confirm • Esc cancel
+────────────────────────────────────────────────────────────────
+#+end_example
+
+#+html:</details>
+
+#+html:<details>
+#+html:<summary><b>📋 Features & Usage</b></summary>
+#+html:<br>
 
 *Features:*
-- *Single question mode* — simple option list with keyboard navigation
-- *Multi-question mode* — tab bar for navigating between questions, with completion indicators (■/□)
-- *Free-text input* — "Type something..." option allows custom responses
-- *Submit review screen* — shows all answers before final confirmation
-- *Autocomplete support* — integrates with pi's TUI autocomplete system
-- Custom ~renderCall~ and ~renderResult~ for clean tool display in chat history
+- *Single question mode* — simple option list
+- *Multi-question mode* — tab bar with completion indicators (■/□)
+- *Free-text input* — "Type something..." option with inline editor
+- *Submit review screen* — shows all answers before confirmation
+- Custom rendering in chat history
 
 *Key bindings (single question):*
-- ~↑↓~ - navigate options
-- ~Enter~ - select option
-- ~Esc~ - cancel
+| Key     | Action          |
+|---------+-----------------|
+| =↑↓=    | Navigate        |
+| =Enter= | Select          |
+| =Esc=   | Cancel          |
 
 *Key bindings (multi-question):*
-- ~Tab/←→~ - navigate between question tabs
-- ~↑↓~ - navigate options within current question
-- ~Enter~ - confirm answer (advances to next question or submit screen)
-- ~Esc~ - cancel questionnaire
+| Key              | Action                 |
+|------------------+------------------------|
+| =Tab= / =←→=     | Navigate between tabs  |
+| =↑↓=             | Navigate options       |
+| =Enter=          | Confirm (advances tab) |
+| =Esc=            | Cancel                 |
 
-*Usage:*
-The LLM calls this tool when it needs structured input. For example:
-- Asking which file to edit when multiple matches exist
-- Confirming destructive operations with Yes/No
-- Collecting configuration preferences before code generation
-- Multi-step wizards (e.g., "Choose framework" → "Choose features" → "Confirm")
+*When the LLM uses it:*
+- Configuration wizards (e.g., project setup with framework/features/deploy choices)
+- Disambiguation ("Which =config.ts= did you mean?")
+- Confirmations with context ("Delete these 15 files? Yes/No")
+- Multi-step workflows
 
 #+begin_quote
-💡 The questionnaire extension is inspired by patterns from [[https://github.com/Mic92][Mic92]]'s pi extensions. Thanks Mic92!
+💡 Inspired by patterns from [[https://github.com/Mic92][Mic92]]'s pi extensions. Thanks Mic92!
 #+end_quote
 
-*** direnv
+#+html:</details>
 
-Automatically loads [[https://direnv.net/][direnv]] environment variables into pi sessions. This mimics how the direnv shell hook works — it runs after every bash command to pick up any =.envrc= changes from =cd=, =git checkout=, etc.
+*** direnv — Auto-Load Environment Variables
+
+Automatically loads [[https://direnv.net/][direnv]] environment variables into pi sessions, running after every bash command to pick up =.envrc= changes.
+
+#+html:<details>
+#+html:<summary><b>🎬 What it looks like</b></summary>
+#+html:<br>
+
+*Status bar indicator:*
+
+#+begin_example
+# While loading:
+direnv …
+
+# Successfully loaded:
+direnv ✓
+
+# Error (e.g., .envrc not allowed):
+direnv ✗
+#+end_example
+
+*When it runs:*
+- On session start
+- After every bash command (picks up =cd=, =git checkout=, =direnv allow=, etc.)
+
+#+html:</details>
+
+#+html:<details>
+#+html:<summary><b>📋 Features & Usage</b></summary>
+#+html:<br>
 
 *Features:*
 - Loads environment on session start
-- Re-evaluates after every bash command (handles =cd=, =git checkout=, =direnv allow=, etc.)
-- Serialised execution — only one direnv process runs at a time
-- 10s timeout so fast completions are handled inline; longer ones finish in the background
+- Re-evaluates after every bash command
+- Serialized execution — only one direnv process at a time
+- 10s timeout for fast completions (longer ones finish in background)
 - Status bar indicator: =direnv …= (running), =direnv ✓= (loaded), =direnv ✗= (error)
 
 *Requirements:*
@@ -99,8 +240,10 @@ Automatically loads [[https://direnv.net/][direnv]] environment variables into p
 - =.envrc= must be allowed (run =direnv allow= in your shell first)
 
 #+begin_quote
-💡 The direnv extension is based on the original implementation by [[https://github.com/Mic92][Mic92]] from [[https://github.com/Mic92/dotfiles/blob/main/home/.pi/agent/extensions/direnv.ts][Mic92/dotfiles]]. Thanks Mic92!
+💡 Based on the original implementation by [[https://github.com/Mic92][Mic92]] from [[https://github.com/Mic92/dotfiles/blob/main/home/.pi/agent/extensions/direnv.ts][Mic92/dotfiles]]. Thanks Mic92!
 #+end_quote
+
+#+html:</details>
 
 ** 🚀 Quick Start
 
@@ -112,7 +255,18 @@ git clone git@github.com:rytswd/pi-agent-extensions.git ~/.pi/agent/extensions
 
 If you already have =~/.pi/agent/extensions/=, you can cherry-pick individual files instead.
 
-*** 2. Use pi as Normal
+*** 2. Install npm Dependencies
+
+The =slow-mode= extension requires the =diff= package for proper unified diff generation:
+
+#+begin_src bash
+cd ~/.pi/agent/extensions
+npm install
+#+end_src
+
+This installs the =diff= package (v7+) specified in =package.json=.
+
+*** 3. Use pi as Normal
 
 Extensions are auto-discovered. Start pi in any project directory and they'll be loaded automatically.
 
@@ -120,17 +274,22 @@ Extensions are auto-discovered. Start pi in any project directory and they'll be
 pi
 #+end_src
 
-You'll see the direnv status indicator in the status bar once it kicks in.
+*** 4. Try the Extensions
+
+- *slow-mode:* Type =/slow-mode= to toggle the review gate
+- *questionnaire:* The LLM will call it automatically when needed
+- *direnv:* Watch the status bar — it loads automatically if you have =.envrc= files
 
 ** 📁 Structure
 
 #+begin_example
 ~/.pi/agent/extensions/
-├── direnv.ts           # Direnv integration extension
-├── questionnaire.ts    # Multi-question tool for LLM-driven user input
-├── slow-mode.ts        # Review gate for write/edit tool calls
-├── package.json        # npm dependencies for extensions (diff package)
-├── node_modules/       # npm packages (diff for slow-mode)
+├── direnv.ts           # Direnv integration
+├── questionnaire.ts    # Multi-question tool
+├── slow-mode.ts        # Review gate for write/edit
+├── package.json        # npm dependencies (diff package)
+├── node_modules/       # npm packages (gitignored)
+├── .gitignore          # Ignores node_modules, logs
 ├── AGENTS.md           # Agent context for AI assistants
 ├── air/                # Air documentation (development planning)
 │   ├── context/        # Project context files
@@ -160,7 +319,7 @@ See the [[https://github.com/mariozechner/pi][pi documentation]] for the full ex
 
 ** 🙏 Acknowledgements
 
-- [[https://github.com/Mic92][Mic92]] — Original direnv extension implementation ([[https://github.com/Mic92/dotfiles/blob/main/home/.pi/agent/extensions/direnv.ts][source]])
+- [[https://github.com/Mic92][Mic92]] — Original direnv extension implementation ([[https://github.com/Mic92/dotfiles/blob/main/home/.pi/agent/extensions/direnv.ts][source]]) and inspiration for questionnaire patterns
 - [[https://github.com/mariozechner][Mario Zechner]] — pi coding agent
 
 ** 📄 License
