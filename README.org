@@ -257,14 +257,14 @@ If you already have =~/.pi/agent/extensions/=, you can cherry-pick individual fi
 
 *** 2. Install Dependencies
 
-Some extensions require third-party packages (e.g., =diff= for proper unified diff generation):
+Some extensions require third-party packages (e.g., =slow-mode= requires =diff= for proper unified diff generation):
 
 #+begin_src bash
-cd ~/.pi/agent/extensions
+cd ~/.pi/agent/extensions/slow-mode
 bun install
 #+end_src
 
-This installs packages specified in =package.json=.
+This installs packages specified in =slow-mode/package.json=.
 
 *** 3. Use pi as Normal
 
@@ -284,11 +284,16 @@ pi
 
 #+begin_example
 ~/.pi/agent/extensions/
-├── direnv.ts           # Direnv integration
-├── questionnaire.ts    # Multi-question tool
-├── slow-mode.ts        # Review gate for write/edit
-├── package.json        # npm dependencies (diff package)
-├── node_modules/       # npm packages (gitignored)
+├── direnv/             # Direnv integration
+│   └── index.ts
+├── questionnaire/      # Multi-question tool
+│   └── index.ts
+├── slow-mode/          # Review gate for write/edit
+│   ├── index.ts
+│   ├── package.json    # Dependencies (diff package)
+│   ├── package-lock.json
+│   ├── bun.lock
+│   └── node_modules/   # npm packages (gitignored)
 ├── .gitignore          # Ignores node_modules, logs
 ├── AGENTS.md           # Agent context for AI assistants
 ├── air/                # Air documentation (development planning)
@@ -299,7 +304,7 @@ pi
 
 ** 🔧 Adding New Extensions
 
-To add a new extension, create a =.ts= file in the root directory. pi auto-discovers any =*.ts= file here.
+To add a new extension, create a directory with an =index.ts= file. pi auto-discovers =*.ts= files and =index.ts= files in subdirectories.
 
 A minimal extension looks like:
 
@@ -313,7 +318,14 @@ export default function (pi: ExtensionAPI) {
 }
 #+end_src
 
-For multi-file extensions, create a subdirectory with an =index.ts= entry point.
+*Recommended structure:*
+
+#+begin_example
+my-extension/
+├── index.ts           # Extension entrypoint
+├── package.json       # Optional: if you need dependencies
+└── node_modules/      # Optional: npm packages (gitignored)
+#+end_example
 
 See the [[https://github.com/mariozechner/pi][pi documentation]] for the full extension API.
 
