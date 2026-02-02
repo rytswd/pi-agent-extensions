@@ -42,7 +42,7 @@ export default function (pi: ExtensionAPI) {
   function runDirenv(cwd: string, ctx: ExtensionContext) {
     const proc = spawn("direnv", ["export", "json"], {
       cwd,
-      stdio: ["pipe", "pipe", "pipe"],
+      stdio: ["ignore", "pipe", "ignore"],
     });
 
     let stdout = "";
