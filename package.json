@@ -1,0 +1,30 @@
+{
+  "name": "pi-agent-extensions",
+  "version": "1.0.0",
+  "description": "A collection of pi coding agent extensions",
+  "type": "module",
+  "keywords": ["pi-package"],
+  "author": "",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/rytswd/pi-agent-extensions.git"
+  },
+  "dependencies": {
+    "diff": "^7.0.0"
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-ai": "*",
+    "@mariozechner/pi-agent-core": "*",
+    "@mariozechner/pi-coding-agent": "*",
+    "@mariozechner/pi-tui": "*",
+    "@sinclair/typebox": "*"
+  },
+  "pi": {
+    "extensions": [
+      "direnv",
+      "questionnaire", 
+      "slow-mode"
+    ]
+  }
+}
