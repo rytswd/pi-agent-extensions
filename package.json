@@ -11,7 +11,8 @@
     "url": "https://github.com/rytswd/pi-agent-extensions.git"
   },
   "dependencies": {
-    "@marckrenn/pi-sub-core": "*"
+    "@marckrenn/pi-sub-core": "*",
+    "@marckrenn/pi-sub-bar": "*"
   },
   "peerDependencies": {
     "@mariozechner/pi-ai": "*",
@@ -25,7 +26,8 @@
       "direnv",
       "questionnaire", 
       "slow-mode",
-      "npm:@marckrenn/pi-sub-core"
+      "node_modules/@marckrenn/pi-sub-core",
+      "node_modules/@marckrenn/pi-sub-bar"
     ]
   }
 }
