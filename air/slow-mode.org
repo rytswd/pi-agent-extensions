@@ -1,0 +1,114 @@
+#+title: Slow Mode
+#+state: complete
+#+FILETAGS: :extension:feature:
+
+* Summary
+
+A pi extension that intercepts ~write~ and ~edit~ tool calls, letting the user review proposed changes before they are applied. New files go to a tmp staging directory; edits produce a unified diff patch file — both are shown for review before committing.
+
+* Motivation
+
+When the LLM makes code changes, they are applied immediately. This is efficient but risky — a bad edit or an unwanted new file is already on disk before the user sees it. Slow mode adds a review gate so the user can approve, reject, or inspect changes before they land.
+
+** Goals
+- Intercept ~write~ tool calls: stage new file content in a tmp directory, show it, let user approve/reject.
+- Intercept ~edit~ tool calls: stage old/new files in a tmp directory, generate a unified diff, show it, let user approve/reject.
+- On approve: proceed with the original tool execution.
+- On reject: block the tool call with a reason (using ~ToolCallEventResult.block~).
+- Toggle slow mode on/off via a ~/slow-mode~ command.
+- Show status bar indicator when slow mode is active.
+- Allow opening staged files in an external diff viewer via Ctrl+O.
+
+** Non-Goals
+- Intercepting ~bash~ commands (too broad, user already has confirmation via pi's built-in mechanism).
+- Providing an in-TUI editor for modifying the proposed changes.
+- Persisting slow mode state across sessions.
+
+* Proposal
+
+** Interception Mechanism
+
+Use the ~tool_call~ event, which fires before tool execution. The handler returns ~ToolCallEventResult~:
+- ~{ block: true, reason: "..." }~ to reject and report back to the LLM.
+- ~undefined~ (no return) to let the tool proceed normally.
+
+** Write Tool (new files / overwrites)
+
+1. On ~tool_call~ where ~toolName === "write"~:
+   - Extract ~path~ and ~content~ from ~event.input~.
+   - Write content to a staging file under ~/tmp/pi-slow-mode/~ mirroring the relative path.
+   - Show a review UI (~ctx.ui.custom~) displaying the staged file path and content.
+   - User presses Enter to approve or Esc to reject.
+2. If approved: return ~undefined~ (tool proceeds normally).
+3. If rejected: return ~{ block: true, reason: "User rejected the write" }~.
+4. Clean up the staged file after decision.
+
+** Edit Tool (modifications)
+
+1. On ~tool_call~ where ~toolName === "edit"~:
+   - Extract ~path~, ~oldText~, ~newText~ from ~event.input~.
+   - Stage both old and new text as separate files (~<name>-<ts>.old~ / ~<name>-<ts>.new~) in the tmp directory.
+   - Generate a unified diff for inline display.
+   - Show a review UI displaying the diff.
+   - User presses Enter to approve, Esc to reject, or Ctrl+O to open in an external diff viewer.
+2. Same approve/reject flow as write.
+3. Clean up both staged files after decision.
+
+** Toggle Command
+
+Register ~/slow-mode~ command:
+- Toggles a boolean ~enabled~ flag.
+- Updates status bar: ~"slow ■"~ when on, cleared when off.
+- Notifies user of state change.
+
+** UI Design
+
+Review component (via ~ctx.ui.custom~):
+- Top: separator line
+- File path in accent colour
+- Operation label: "NEW FILE" or "EDIT (diff)"
+- Content/diff body (scrollable if long)
+- Bottom: "Enter to approve • Esc to reject"
+- Bottom: separator line
+
+Keep it simple — no tabs, no multi-select. One change at a time, inline with the tool call flow.
+
+* Design Details
+
+** Staging Directory
+- ~/tmp/pi-slow-mode-<pid>/~ to avoid collisions between sessions.
+- Created on first use, cleaned up lazily (OS handles ~/tmp~ cleanup).
+- Mirror the relative path structure: if writing ~src/foo.ts~, stage at ~/tmp/pi-slow-mode-<pid>/src/foo.ts~.
+
+** Diff Generation
+- For edit: simple unified diff format showing old/new text with file path context.
+- Use a minimal inline diff function — no external dependency needed.
+- Write patch to ~/tmp/pi-slow-mode-<pid>/<filename>-<timestamp>.patch~.
+
+** Non-Interactive Mode
+- If ~!ctx.hasUI~, slow mode is a no-op (all changes proceed immediately).
+- The ~/slowmode~ command should notify that it requires interactive mode.
+
+** Test Plan
+- Manual testing via ~/slowmode~ toggle.
+- Test with ~write~ of a new file — verify staging + review.
+- Test with ~edit~ of an existing file — verify diff display + review.
+- Test reject flow — verify tool is blocked and LLM gets the rejection message.
+- Test with ~ctx.hasUI === false~ — verify pass-through.
+
+* Drawbacks
+- Adds friction to every write/edit when enabled — only useful when caution is needed.
+- Reviewing large diffs in the TUI may be awkward (but scrolling helps).
+
+* Alternatives
+- Could intercept at ~tool_result~ level and revert — but that's more complex and leaves a window where bad changes exist on disk.
+- Could use ~ctx.ui.confirm~ instead of ~ctx.ui.custom~ — simpler but less informative (no diff preview).
+
+* History
+- 2026-02-01: Initial specification drafted.
+- 2026-02-01: Implementation complete — slow-mode.ts created.
+
+* References
+- ~ToolCallEventResult.block~ — upstream mechanism for rejecting tool calls.
+- ~ctx.ui.custom<T>~ — TUI component API for interactive review.
+- ~direnv.ts~, ~questionnaire.ts~ — existing extension patterns.
