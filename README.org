@@ -21,6 +21,24 @@ These extensions live in =~/.pi/agent/extensions/= for global auto-discovery —
 
 ** ✨ Extensions
 
+*** slow-mode
+
+Intercepts ~write~ and ~edit~ tool calls, letting you review proposed changes before they are applied. New files are staged in a temporary directory; edits stage old/new versions and display an inline diff.
+
+*Features:*
+- Inline diff preview for edit operations with contextual colouring
+- Ctrl+O opens staged files in an external diff viewer (delta/vim/diff auto-detected)
+- Scrollable preview for large changes (↑↓/PgUp/PgDn)
+- Toggle command: ~/slow-mode~
+- Status bar indicator: ~slow ■~ (active) or cleared (inactive)
+- No-op in non-interactive mode (headless sessions bypass the review)
+
+*Key bindings:*
+- ~Enter~ - approve changes
+- ~Esc~ - reject changes
+- ~Ctrl+O~ - open in external diff viewer
+- ~↑↓/PgUp/PgDn~ - scroll preview
+
 *** direnv
 
 Automatically loads [[https://direnv.net/][direnv]] environment variables into pi sessions. This mimics how the direnv shell hook works — it runs after every bash command to pick up any =.envrc= changes from =cd=, =git checkout=, etc.

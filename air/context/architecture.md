@@ -67,6 +67,27 @@ Key design decisions:
 - **Timeout**: 10s inline wait; if direnv takes longer, it finishes in the background
 - **Idempotent**: Empty output (no changes) is treated as success
 
+### slow-mode.ts
+
+```
+/slow-mode ──► toggle enabled flag ──► update status bar
+
+tool_call (write) ──► stage file in /tmp ──► review UI ──► Ctrl+O → open external
+                                                         ├── approve → proceed
+                                                         └─ reject → { block: true }
+
+tool_call (edit) ──► stage old/new in /tmp ──► review UI ──► Ctrl+O → open external
+                                                   ├── approve → proceed
+                                                   └─ reject → { block: true }
+```
+
+Key design decisions:
+- **Interception**: Uses `tool_call` event with `ToolCallEventResult.block` to gate execution
+- **Staging**: Writes proposed content (writes) and old/new files (edits) to `/tmp/pi-slow-mode-<pid>/` for inspection
+- **External viewer**: Discovers delta/vim/diff and opens staged files via Ctrl+O; staged files persist until review complete
+- **No-op in headless mode**: If `!ctx.hasUI`, all changes proceed immediately
+- **Toggle**: `/slow-mode` command flips a boolean — no persistent state across sessions
+
 ## Adding a New Extension
 
 1. Create `extension-name.ts` in the project root
