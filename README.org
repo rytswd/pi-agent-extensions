@@ -26,7 +26,7 @@ These extensions live in =~/.pi/agent/extensions/= for global auto-discovery —
 Intercepts =write= and =edit= tool calls, letting you review and approve/reject changes before they hit disk.
 
 #+html:<details>
-#+html:<summary><b>🎬 What it looks like</b></summary>
+#+html:<summary><b>What it looks like</b></summary>
 #+html:<br>
 
 *For edits:* Opens delta/vim diff viewer by default
@@ -64,7 +64,7 @@ Apply changes to air/slow-mode.org?
 #+html:</details>
 
 #+html:<details>
-#+html:<summary><b>📋 Features & Usage</b></summary>
+#+html:<summary><b>Features & Usage</b></summary>
 #+html:<br>
 
 *Features:*
@@ -89,10 +89,10 @@ Apply changes to air/slow-mode.org?
 | =G=           | Jump to bottom               |
 
 *Requirements:*
-- =diff= npm package (automatically installed via =npm install= — see Quick Start)
+- =diff= package (automatically installed via =bun install= — see Quick Start)
 - Optional: =delta=, =nvim=, or =vim= for external diff viewing
 
-*Note:* The =diff= package provides proper unified diff generation (Myers algorithm). Without it, slow-mode will fail to load.
+*Note:* The =diff= package provides proper unified diff generation (Myers algorithm). Without it, this extension will fail to load.
 
 #+html:</details>
 
@@ -101,7 +101,7 @@ Apply changes to air/slow-mode.org?
 A tool the LLM can call to ask you single or multiple-choice questions with tab-based navigation.
 
 #+html:<details>
-#+html:<summary><b>🎬 What it looks like</b></summary>
+#+html:<summary><b>What it looks like</b></summary>
 #+html:<br>
 
 *Multi-question flow:*
@@ -160,7 +160,7 @@ Tab/←→ navigate • ↑↓ select • Enter confirm • Esc cancel
 #+html:</details>
 
 #+html:<details>
-#+html:<summary><b>📋 Features & Usage</b></summary>
+#+html:<summary><b>Features & Usage</b></summary>
 #+html:<br>
 
 *Features:*
@@ -192,7 +192,7 @@ Tab/←→ navigate • ↑↓ select • Enter confirm • Esc cancel
 - Multi-step workflows
 
 #+begin_quote
-💡 Inspired by patterns from [[https://github.com/Mic92][Mic92]]'s pi extensions. Thanks Mic92!
+💡 Based on the original implementation by [[https://github.com/Mic92][Mic92]] from [[https://github.com/Mic92/dotfiles/blob/main/home/.pi/agent/extensions/questionnaire.ts][Mic92/dotfiles]]. Thanks Mic92!
 #+end_quote
 
 #+html:</details>
@@ -202,7 +202,7 @@ Tab/←→ navigate • ↑↓ select • Enter confirm • Esc cancel
 Automatically loads [[https://direnv.net/][direnv]] environment variables into pi sessions, running after every bash command to pick up =.envrc= changes.
 
 #+html:<details>
-#+html:<summary><b>🎬 What it looks like</b></summary>
+#+html:<summary><b>What it looks like</b></summary>
 #+html:<br>
 
 *Status bar indicator:*
@@ -225,7 +225,7 @@ direnv ✗
 #+html:</details>
 
 #+html:<details>
-#+html:<summary><b>📋 Features & Usage</b></summary>
+#+html:<summary><b>Features & Usage</b></summary>
 #+html:<br>
 
 *Features:*
@@ -255,16 +255,16 @@ git clone git@github.com:rytswd/pi-agent-extensions.git ~/.pi/agent/extensions
 
 If you already have =~/.pi/agent/extensions/=, you can cherry-pick individual files instead.
 
-*** 2. Install npm Dependencies
+*** 2. Install Dependencies
 
-The =slow-mode= extension requires the =diff= package for proper unified diff generation:
+Some extensions require third-party packages (e.g., =diff= for proper unified diff generation):
 
 #+begin_src bash
 cd ~/.pi/agent/extensions
-npm install
+bun install
 #+end_src
 
-This installs the =diff= package (v7+) specified in =package.json=.
+This installs packages specified in =package.json=.
 
 *** 3. Use pi as Normal
 
@@ -319,7 +319,7 @@ See the [[https://github.com/mariozechner/pi][pi documentation]] for the full ex
 
 ** 🙏 Acknowledgements
 
-- [[https://github.com/Mic92][Mic92]] — Original direnv extension implementation ([[https://github.com/Mic92/dotfiles/blob/main/home/.pi/agent/extensions/direnv.ts][source]]) and inspiration for questionnaire patterns
+- [[https://github.com/Mic92][Mic92]] — Original direnv ([[https://github.com/Mic92/dotfiles/blob/main/home/.pi/agent/extensions/direnv.ts][source]]) and questionnaire ([[https://github.com/Mic92/dotfiles/blob/main/home/.pi/agent/extensions/questionnaire.ts][source]]) implementations
 - [[https://github.com/mariozechner][Mario Zechner]] — pi coding agent
 
 ** 📄 License
