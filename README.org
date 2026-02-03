@@ -32,7 +32,7 @@ pi install git:github/rytswd/pi-agent-extensions
 #+end_src
 
 This command:
-1. Clones the repository to =~/.pi/agent/packages/=
+1. Clones the repository to =~/.pi/agent/git/=
 2. Runs =npm install= to install dependencies
 3. Adds the package path to =~/.pi/agent/settings.json= (="packages"= stanza)
 4. Makes all extensions available to pi automatically
