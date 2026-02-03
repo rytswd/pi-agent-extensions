@@ -48,13 +48,42 @@ in
     # Run 'pi install' if pi binary is available
     home.activation.pi-agent-extensions = lib.mkIf (cfg.pi != null) (
       lib.hm.dag.entryAfter ["writeBoundary"] ''
+        echo "════════════════════════════════════════════════════════════"
+        echo "Home Manager: Installing pi-agent-extensions"
+        echo "────────────────────────────────────────────────────────────"
+        
         if [ -x "${cfg.pi}/bin/pi" ]; then
-          echo "Installing pi-agent-extensions via pi install..."
-          $DRY_RUN_CMD ${cfg.pi}/bin/pi install "${cfg.package}" || {
-            echo "Warning: pi install failed. You can manually install with:"
+          echo "Pi binary: ${cfg.pi}/bin/pi"
+          echo "Package: ${cfg.package}"
+          echo "────────────────────────────────────────────────────────────"
+          
+          # Create temp file for error output
+          STDERR_LOG=$(mktemp)
+          
+          if $DRY_RUN_CMD ${cfg.pi}/bin/pi install "${cfg.package}" 2>"$STDERR_LOG"; then
+            echo "✓ SUCCESS: Extensions registered with pi"
+            rm -f "$STDERR_LOG"
+          else
+            EXIT_CODE=$?
+            echo "✗ FAILED: pi install exited with code $EXIT_CODE"
+            echo ""
+            echo "Error output:"
+            cat "$STDERR_LOG" 2>/dev/null || echo "(no error output)"
+            rm -f "$STDERR_LOG"
+            echo ""
+            echo "Manual installation required:"
             echo "  pi install ${cfg.package}"
-          }
+            echo ""
+            echo "Or check pi configuration:"
+            echo "  pi config"
+          fi
+        else
+          echo "✗ ERROR: Pi binary not found or not executable"
+          echo "Expected: ${cfg.pi}/bin/pi"
+          echo ""
+          echo "Please ensure pi is installed and try again."
         fi
+        echo "════════════════════════════════════════════════════════════"
       ''
     );
 
