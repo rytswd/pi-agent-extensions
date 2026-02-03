@@ -103,196 +103,218 @@ Extensions are auto-discovered from =~/.pi/agent/extensions/= — pi loads all =
 
 ** ✨ Extensions
 
-- *slow-mode*: Review gate for =write= and =edit= tool calls
+#+html:<details>
+#+html:<summary><strong>slow-mode</strong> - Review gate for <code>write</code> and <code>edit</code> tool calls</summary>
+#+html:<br>
 
-  #+html:<details>
-  #+html:<summary><i>View details</i></summary>
-  #+html:<br>
+- *Source*: [[https://github.com/rytswd/pi-agent-extensions/tree/main/slow-mode][slow-mode/]]
+- *License*: MIT
+- *Toggle*: =/slow-mode=
+- *Status bar*: =slow ■= (when active)
+- *Dependencies*: =diff= package (auto-installed via =bun install=)
+- *Optional*: =delta=, =nvim=, or =vim= for external diff viewing
 
-  Intercepts =write= and =edit= tool calls, letting you review and approve/reject changes before they hit disk.
+*Description*: Intercepts =write= and =edit= tool calls, letting you review and approve/reject changes before they hit disk.
 
-  *Features:*
-  - External diff viewer by default for edits (delta/vim/diff)
-  - Proper unified diff using Myers algorithm
-  - Vim-style navigation in inline TUI (=j/k=, =u/d=, =gg/G=)
-  - Toggle with =/slow-mode= command
-  - Status bar indicator: =slow ■= (active)
+*Features*:
+- External diff viewer by default for edits (delta/vim/diff)
+- Proper unified diff using Myers algorithm
+- Vim-style navigation in inline TUI (=j/k=, =u/d=, =gg/G=)
+- =Ctrl+O= from inline view opens external diff viewer
 
-  *Key bindings:*
-  | Key           | Action                       |
-  |---------------+------------------------------|
-  | =Enter=       | Approve changes              |
-  | =Esc=         | Reject changes               |
-  | =Ctrl+O=      | Open in external diff viewer |
-  | =j/k= / =↑↓=  | Scroll line by line          |
-  | =u/d=         | Scroll half page             |
-  | =gg= / =G=    | Jump to top/bottom           |
+*Key bindings*:
+| Key           | Action                       |
+|---------------+------------------------------|
+| =Enter=       | Approve changes              |
+| =Esc=         | Reject changes               |
+| =Ctrl+O=      | Open in external diff viewer |
+| =j/k= / =↑↓=  | Scroll line by line          |
+| =u/d=         | Scroll half page             |
+| =gg= / =G=    | Jump to top/bottom           |
 
-  *Requirements:* =diff= package (auto-installed via =bun install=), optional: =delta=, =nvim=, or =vim=
+*What it looks like*:
 
-  *What it looks like:*
+For edits, opens delta/vim diff viewer by default:
 
-  For edits, opens delta/vim diff viewer by default:
+#+begin_example
+# Delta opens in your terminal showing side-by-side diff
+# After you close delta, you get a confirmation prompt:
 
-  #+begin_example
-  # Delta opens in your terminal showing side-by-side diff
-  # After you close delta, you get a confirmation prompt:
+Apply changes to air/slow-mode.org?
+  > Yes
+    No
+#+end_example
 
-  Apply changes to air/slow-mode.org?
-    > Yes
-      No
-  #+end_example
+For writes (or if no external viewer), shows inline TUI diff:
 
-  For writes (or if no external viewer), shows inline TUI diff:
+#+begin_example
+────────────────────────────────────────────────────────────────
+ EDIT (diff)
+ slow-mode.ts
 
-  #+begin_example
-  ────────────────────────────────────────────────────────────────
-   EDIT (diff)
-   slow-mode.ts
+ @@ -28,7 +28,9 @@
+  export default function slowMode(pi: ExtensionAPI) {
+ +  // State: whether slow mode is currently enabled
+    let enabled = false;
+ +
+ +  // Staging directory for review
+    const tmpDir = `/tmp/pi-slow-mode-${process.pid}`;
 
-   @@ -28,7 +28,9 @@
-    export default function slowMode(pi: ExtensionAPI) {
-   +  // State: whether slow mode is currently enabled
-      let enabled = false;
-   +
-   +  // Staging directory for review
-      const tmpDir = `/tmp/pi-slow-mode-${process.pid}`;
+ (lines 1–30 of 150 — j/k u/d gg/G scroll)
 
-   (lines 1–30 of 150 — j/k u/d gg/G scroll)
+ Enter approve • Esc reject • Ctrl+O external • j/k u/d gg/G scroll
+────────────────────────────────────────────────────────────────
+#+end_example
 
-   Enter approve • Esc reject • Ctrl+O external • j/k u/d gg/G scroll
-  ────────────────────────────────────────────────────────────────
-  #+end_example
+#+html:</details>
 
-  #+html:</details>
+#+html:<details>
+#+html:<summary><strong>questionnaire</strong> - Interactive multi-question tool with tab navigation</summary>
+#+html:<br>
 
-- *questionnaire*: Interactive multi-question tool with tab navigation
+- *Source*: [[https://github.com/rytswd/pi-agent-extensions/tree/main/questionnaire][questionnaire/]]
+- *License*: MIT
+- *Type*: Tool (LLM-callable)
+- *Use cases*: Configuration wizards, disambiguation, confirmations, multi-step workflows
 
-  #+html:<details>
-  #+html:<summary><i>View details</i></summary>
-  #+html:<br>
+*Description*: A tool the LLM can call to ask single or multiple-choice questions with tab-based navigation.
 
-  A tool the LLM can call to ask single or multiple-choice questions with tab-based navigation.
+*Features*:
+- Single question mode with option list
+- Multi-question mode with tab bar and completion indicators (■/□)
+- Free-text input option
+- Submit review screen showing all answers
+- Custom rendering in chat history
 
-  *Features:*
-  - Single question mode with option list
-  - Multi-question mode with tab bar and completion indicators (■/□)
-  - Free-text input option
-  - Submit review screen showing all answers
-  - Custom rendering in chat history
+*Key bindings*:
+| Key              | Action                 |
+|------------------+------------------------|
+| =Tab= / =←→=     | Navigate between tabs  |
+| =↑↓=             | Navigate options       |
+| =Enter=          | Confirm selection      |
+| =Esc=            | Cancel                 |
 
-  *Key bindings:*
-  | Key              | Action                 |
-  |------------------+------------------------|
-  | =Tab= / =←→=     | Navigate between tabs  |
-  | =↑↓=             | Navigate options       |
-  | =Enter=          | Confirm selection      |
-  | =Esc=            | Cancel                 |
+*What it looks like*:
 
-  *Use cases:* Configuration wizards, disambiguation, confirmations, multi-step workflows
+Multi-question flow:
 
-  *What it looks like:*
+#+begin_example
+────────────────────────────────────────────────────────────────
+← □ Framework  □ TypeScript  □ Styling  ✓ Submit →
 
-  Multi-question flow:
+Which framework would you like to use?
 
-  #+begin_example
-  ────────────────────────────────────────────────────────────────
-  ← □ Framework  □ TypeScript  □ Styling  ✓ Submit →
+> 1. React
+     Component-based library
+  2. Vue
+     Progressive framework
+  3. Svelte
+     Compiled framework
+  4. Type something.
 
-  Which framework would you like to use?
+Tab/←→ navigate • ↑↓ select • Enter confirm • Esc cancel
+────────────────────────────────────────────────────────────────
+#+end_example
 
-  > 1. React
-       Component-based library
-    2. Vue
-       Progressive framework
-    3. Svelte
-       Compiled framework
-    4. Type something.
+After selecting "React" and pressing Enter:
 
-  Tab/←→ navigate • ↑↓ select • Enter confirm • Esc cancel
-  ────────────────────────────────────────────────────────────────
-  #+end_example
+#+begin_example
+────────────────────────────────────────────────────────────────
+← ■ Framework  □ TypeScript  □ Styling  ✓ Submit →
 
-  After selecting "React" and pressing Enter:
+Do you want to use TypeScript?
 
-  #+begin_example
-  ────────────────────────────────────────────────────────────────
-  ← ■ Framework  □ TypeScript  □ Styling  ✓ Submit →
+> 1. Yes
+  2. No
 
-  Do you want to use TypeScript?
+Tab/←→ navigate • ↑↓ select • Enter confirm • Esc cancel
+────────────────────────────────────────────────────────────────
+#+end_example
 
-  > 1. Yes
-    2. No
+Final submit screen shows all answers:
 
-  Tab/←→ navigate • ↑↓ select • Enter confirm • Esc cancel
-  ────────────────────────────────────────────────────────────────
-  #+end_example
+#+begin_example
+────────────────────────────────────────────────────────────────
+← ■ Framework  ■ TypeScript  ■ Styling  ✓ Submit →
 
-  Final submit screen shows all answers:
+Ready to submit
 
-  #+begin_example
-  ────────────────────────────────────────────────────────────────
-  ← ■ Framework  ■ TypeScript  ■ Styling  ✓ Submit →
+Framework: 1. React
+TypeScript: 1. Yes
+Styling: 1. Tailwind CSS
 
-  Ready to submit
+Press Enter to submit
 
-  Framework: 1. React
-  TypeScript: 1. Yes
-  Styling: 1. Tailwind CSS
+Tab/←→ navigate • ↑↓ select • Enter confirm • Esc cancel
+────────────────────────────────────────────────────────────────
+#+end_example
 
-  Press Enter to submit
+#+html:</details>
 
-  Tab/←→ navigate • ↑↓ select • Enter confirm • Esc cancel
-  ────────────────────────────────────────────────────────────────
-  #+end_example
+#+html:<details>
+#+html:<summary><strong>direnv</strong> - Auto-loads environment variables from <code>.envrc</code> files</summary>
+#+html:<br>
 
-  #+html:</details>
+- *Source*: [[https://github.com/rytswd/pi-agent-extensions/tree/main/direnv][direnv/]]
+- *License*: MIT
+- *Homepage*: [[https://direnv.net/][direnv.net]]
+- *Status bar*: =direnv …= (loading), =direnv ✓= (loaded), =direnv ✗= (error)
+- *Requirements*: =direnv= installed and =.envrc= files must be allowed (=direnv allow=)
+- *Credit*: Based on the original implementation by [[https://github.com/Mic92][Mic92]] from [[https://github.com/Mic92/dotfiles/blob/main/home/.pi/agent/extensions/direnv.ts][Mic92/dotfiles]]
 
-- *direnv*: Auto-loads environment variables from =.envrc= files
+*Description*: Automatically loads [[https://direnv.net/][direnv]] environment variables into pi sessions, running after every bash command to pick up =.envrc= changes.
 
-  #+html:<details>
-  #+html:<summary><i>View details</i></summary>
-  #+html:<br>
+*Features*:
+- Loads environment on session start and after every bash command
+- Serialized execution with 10s timeout
+- Picks up changes from =cd=, =git checkout=, =direnv allow=, etc.
 
-  Automatically loads [[https://direnv.net/][direnv]] environment variables into pi sessions, running after every bash command to pick up =.envrc= changes.
+*What it looks like*:
 
-  *Features:*
-  - Loads environment on session start and after every bash command
-  - Serialized execution with 10s timeout
-  - Status bar indicator: =direnv …= (loading), =direnv ✓= (loaded), =direnv ✗= (error)
+Status bar indicator:
 
-  *Requirements:* =direnv= installed and =.envrc= files must be allowed (=direnv allow=)
+#+begin_example
+# While loading:
+direnv …
 
-  *What it looks like:*
+# Successfully loaded:
+direnv ✓
 
-  Status bar indicator:
+# Error (e.g., .envrc not allowed):
+direnv ✗
+#+end_example
 
-  #+begin_example
-  # While loading:
-  direnv …
+*When it runs*:
+- On session start
+- After every bash command
 
-  # Successfully loaded:
-  direnv ✓
+#+html:</details>
 
-  # Error (e.g., .envrc not allowed):
-  direnv ✗
-  #+end_example
+#+html:<details>
+#+html:<summary><strong>@marckrenn/pi-sub-core</strong> - Status bar core implementation</summary>
+#+html:<br>
 
-  *When it runs:*
-  - On session start
-  - After every bash command (picks up =cd=, =git checkout=, =direnv allow=, etc.)
+- *Source*: [[https://github.com/marckrenn/pi-sub][pi-sub upstream]]
+- *License*: MIT
+- *Author*: [[https://github.com/marckrenn][marckrenn]]
+- *Type*: Dependency (used by pi-sub-bar)
 
-  #+begin_quote
-  💡 Based on the original implementation by [[https://github.com/Mic92][Mic92]] from [[https://github.com/Mic92/dotfiles/blob/main/home/.pi/agent/extensions/direnv.ts][Mic92/dotfiles]]. Thanks Mic92!
-  #+end_quote
+*Description*: Core implementation for the status bar system, providing the foundational utilities and APIs for status bar management.
 
-  #+html:</details>
+#+html:</details>
 
-- *@marckrenn/pi-sub-core*: Status bar core impl
-  [[https://github.com/marckrenn/pi-sub][→ pi-sub upstream]]
+#+html:<details>
+#+html:<summary><strong>@marckrenn/pi-sub-bar</strong> - Status bar management</summary>
+#+html:<br>
 
-- *@marckrenn/pi-sub-bar*: Status bar
-  [[https://github.com/marckrenn/pi-sub][→ pi-sub upstream]]
+- *Source*: [[https://github.com/marckrenn/pi-sub][pi-sub upstream]]
+- *License*: MIT
+- *Author*: [[https://github.com/marckrenn][marckrenn]]
+- *Dependencies*: =@marckrenn/pi-sub-core=
+
+*Description*: Status bar extension that provides a persistent bottom bar for displaying extension status, notifications, and other real-time information in the pi terminal interface.
+
+#+html:</details>
 
 ** ⚙️ Configuration
 
