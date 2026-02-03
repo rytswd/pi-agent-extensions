@@ -15,16 +15,16 @@
 
 ** 🌄 Overview
 
-*pi-agent-extensions* is a collection of [[https://github.com/mariozechner/pi][pi]] coding agent extensions that enhance the development experience. Each extension is a standalone TypeScript file that plugs into pi's extension system.
+*pi-agent-extensions* is a collection of [[https://github.com/mariozechner/pi][pi]] coding agent extensions that enhance the development experience. Each extension is a standalone TypeScript file that plugs into pi's extension system.These extensions are configured for global auto-discovery and loaded on every pi session.
 
-These extensions live in =~/.pi/agent/extensions/= for global auto-discovery — just drop them in and they're loaded on every pi session.
+By default, pi's extension system enables all the extensions. Using ~pi config~ command, extensions can be disabled per user.
 
 ** 📦 Installation
 
 Choose one of the following methods:
 
 #+html:<details>
-#+html:<summary><b>Method 1: Install via pi Package Manager (Recommended)</b></summary>
+#+html:<summary><b>Method 1: Install via pi Package Manager</b></summary>
 #+html:<br>
 
 #+begin_src bash
@@ -40,32 +40,34 @@ This command:
 #+html:</details>
 
 #+html:<details>
-#+html:<summary><b>Method 2: Manual Installation via Git Clone + Package Configuration</b></summary>
+#+html:<summary><b>Method 2: Manual Installation via Git Clone</b></summary>
 #+html:<br>
 
 1. Clone the repository to any directory:
 
-   #+begin_src bash
-   git clone https://github.com/rytswd/pi-agent-extensions.git ~/path/to/pi-agent-extensions
-   #+end_src
+#+begin_src bash
+  git clone https://github.com/rytswd/pi-agent-extensions.git ~/path/to/pi-agent-extensions
+#+end_src
 
 2. Install dependencies:
 
-   #+begin_src bash
-   cd ~/path/to/pi-agent-extensions
-   npm install
-   # or: bun install
-   #+end_src
+#+begin_src bash
+  cd ~/path/to/pi-agent-extensions
+  npm install
+  # or: bun install
+#+end_src
 
 3. Add the package to pi's configuration by editing =~/.pi/agent/settings.json=:
 
-   #+begin_src json
-   {
-     "packages": [
-       "/absolute/path/to/pi-agent-extensions"
-     ]
-   }
-   #+end_src
+#+begin_src json
+  {
+    "packages": [
+      "/absolute/path/to/pi-agent-extensions"
+    ]
+  }
+#+end_src
+
+This setup enables all of the extensions.
 
 #+html:</details>
 
@@ -325,7 +327,21 @@ Resource Configuration                     space toggle · esc close
 ────────────────────────────────────────────────────────────────
 #+end_example
 
-Changes are saved to =~/.pi/agent/settings.json= and take effect on the next pi session.
+Changes are saved to =~/.pi/agent/settings.json= and take effect on the next pi session. The actual content of ~settings.json~ would look like below.
+
+#+begin_src jsonc
+  {
+    "packages": [
+      {
+        "source": "~/Coding/github.com/rytswd/pi-agent-extensions",
+        "extensions": [
+          "-questionnaire/index.ts" # Disabled
+        ]
+      }
+    ]
+  }
+#+end_src
+
 
 ** 🚀 Quick Start
 
