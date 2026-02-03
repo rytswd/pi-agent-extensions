@@ -8,6 +8,7 @@
 #+html:<img src="https://img.shields.io/badge/pi-extensions-blue?style=flat-square" alt="pi extensions">
 #+html:<a href="https://github.com/rytswd/pi-agent-extensions"><img src="https://img.shields.io/badge/Source-grey?style=flat-square&logo=github" alt="GitHub Source"></a>
 #+html:<img src="https://img.shields.io/badge/License-MIT-blue?style=flat-square" alt="MIT License">
+#+html:<img src="https://img.shields.io/badge/Nix-Flake-blue?style=flat-square&logo=nixos" alt="Nix Flake">
 #+html:</p>
 #+html:</div>
 
@@ -19,12 +20,64 @@
 
 By default, pi's extension system enables all the extensions. Using ~pi config~ command, extensions can be disabled per user.
 
+*Available as a [[https://nixos.org/][Nix]] flake* using [[https://github.com/numtide/blueprint][blueprint]] for reproducible, declarative installation on NixOS and other systems.
+
 ** 📦 Installation
 
 Choose one of the following methods:
 
+*** Using Nix Flakes (Recommended)
+
+Add to your NixOS or nix-darwin configuration:
+
+#+begin_src nix
+{
+  inputs = {
+    pi-agent-extensions.url = "github:rytswd/pi-agent-extensions";
+  };
+
+  # In your system packages:
+  environment.systemPackages = with inputs.pi-agent-extensions.packages.${pkgs.stdenv.hostPlatform.system}; [
+    pi-agent-extensions
+  ];
+}
+#+end_src
+
+*** With Home Manager (Declarative)
+
+Add to your =home.nix= or flake configuration:
+
+#+begin_src nix
+{
+  inputs.pi-agent-extensions.url = "github:rytswd/pi-agent-extensions";
+  
+  # In your home-manager configuration:
+  imports = [ inputs.pi-agent-extensions.homeModules.pi-agent-extensions ];
+  
+  programs.pi.extensions.pi-agent-extensions.enable = true;
+}
+#+end_src
+
+Then run: =home-manager switch=
+
+This automatically runs =pi install= with the package path, letting pi manage the configuration.
+
+*** Try Without Installing
+
+#+begin_src bash
+# Try the extensions without installing
+nix run github:rytswd/pi-agent-extensions
+#+end_src
+
+*Benefits of Nix:*
+- ✅ Reproducible builds across systems
+- ✅ Automatic dependency management in =/nix/store=
+- ✅ Clean uninstalls with no leftover files
+- ✅ Declarative configuration
+- ✅ Atomic updates and easy rollbacks
+
 #+html:<details>
-#+html:<summary><b>Method 1: Install via pi Package Manager</b></summary>
+#+html:<summary><b>Install via pi Package Manager</b></summary>
 #+html:<br>
 
 #+begin_src bash
@@ -40,7 +93,7 @@ This command:
 #+html:</details>
 
 #+html:<details>
-#+html:<summary><b>Method 2: Manual Installation via Git Clone</b></summary>
+#+html:<summary><b>Manual Installation via Git Clone</b></summary>
 #+html:<br>
 
 1. Clone the repository to any directory:
@@ -72,7 +125,7 @@ This setup enables all of the extensions.
 #+html:</details>
 
 #+html:<details>
-#+html:<summary><b>Method 3: Copy Individual Extensions</b></summary>
+#+html:<summary><b>Copy Individual Extensions</b></summary>
 #+html:<br>
 
 For selective installation, copy specific extension directories to =~/.pi/agent/extensions/=:
@@ -382,8 +435,10 @@ pi
 
 ** 📁 Structure
 
+*** Extension Source Code
+
 #+begin_example
-~/.pi/agent/extensions/
+pi-agent-extensions/
 ├── direnv/             # Direnv integration
 │   └── index.ts
 ├── questionnaire/      # Multi-question tool
@@ -391,17 +446,99 @@ pi
 ├── slow-mode/          # Review gate for write/edit
 │   ├── index.ts
 │   ├── package.json    # Dependencies (diff package)
-│   ├── package-lock.json
-│   ├── bun.lock
 │   └── node_modules/   # npm packages (gitignored)
 ├── package.json        # Package metadata and extension list
-├── .gitignore          # Ignores node_modules, logs
-├── AGENTS.md           # Agent context for AI assistants
-├── air/                # Air documentation (development planning)
-│   ├── context/        # Project context files
-│   └── ...
+├── LICENSE
 └── README.org          # This file
 #+end_example
+
+*** Nix Files (Blueprint Structure)
+
+This project uses [[https://github.com/numtide/blueprint][blueprint]] to organize Nix files with =prefix = "nix"=:
+
+#+begin_example
+nix/
+├── packages/
+│   └── pi-agent-extensions/    # Package definition
+│       └── default.nix
+├── devshells/
+│   └── default.nix             # Development environment
+├── modules/
+│   └── home-manager/           # Home-manager integration
+│       └── pi-agent-extensions.nix
+├── checks/
+│   └── extensions.nix          # Verification tests
+└── formatter.nix               # Code formatter
+#+end_example
+
+Blueprint automatically maps these folders to flake outputs:
+- =nix/packages/*= → =packages.*=
+- =nix/devshells/*= → =devShells.*=
+- =nix/modules/home-manager/*= → =homeModules.*=
+- =nix/checks/*= → =checks.*=
+- =nix/formatter.nix= → =formatter.*=
+
+** 🔨 Nix Development
+
+*** Building Locally
+
+#+begin_src bash
+# Clone the repository
+git clone https://github.com/rytswd/pi-agent-extensions.git
+cd pi-agent-extensions
+
+# Check the flake
+nix flake check
+
+# Build the package
+nix build
+
+# Get the output path
+nix build --no-link --print-out-paths
+#+end_src
+
+*** Development Shell
+
+#+begin_src bash
+# Enter development environment
+nix develop
+
+# Available tools: nodejs, npm, jq, prefetch-npm-deps
+#+end_src
+
+*** Updating Dependencies
+
+When =package.json= or =package-lock.json= changes:
+
+#+begin_src bash
+# 1. Update package-lock.json
+npm install
+
+# 2. Regenerate the hash
+nix-shell -p prefetch-npm-deps --run 'prefetch-npm-deps package-lock.json'
+
+# 3. Update npmDepsHash in nix/packages/pi-agent-extensions/default.nix
+
+# 4. Test build
+nix build
+#+end_src
+
+*** Formatting
+
+#+begin_src bash
+# Format all Nix files
+nix fmt
+#+end_src
+
+*** Adding Nix Components
+
+*New Package:* Create =nix/packages/mypackage/default.nix=
+
+*New DevShell:* Create =nix/devshells/myshell.nix=
+
+*New Check:* Create =nix/checks/mycheck.nix=
+
+Blueprint automatically discovers these files and exposes them as flake outputs.
 
 ** 🔧 Adding New Extensions
 
