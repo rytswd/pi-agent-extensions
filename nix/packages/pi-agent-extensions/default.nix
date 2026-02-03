@@ -49,51 +49,15 @@ pkgs.buildNpmPackage rec {
     runHook postInstall
   '';
 
-  # Post-installation hook: run 'pi install' if pi binary is available
-  postInstall = pkgs.lib.optionalString (pi != null) ''
-    echo "════════════════════════════════════════════════════════════"
-    echo "Attempting automatic installation via 'pi install'..."
-    echo "────────────────────────────────────────────────────────────"
-    echo "Pi binary: ${pi}/bin/pi"
-    echo "Package path: $out"
-    echo "────────────────────────────────────────────────────────────"
-    
-    # Create a temporary file to capture stderr
-    STDERR_LOG=$(mktemp)
-    
-    if ${pi}/bin/pi install "$out" 2>"$STDERR_LOG"; then
-      echo "✓ SUCCESS: pi-agent-extensions installed automatically"
-      echo ""
-      echo "Extensions are now available in pi. To verify, run:"
-      echo "  pi config"
-      rm -f "$STDERR_LOG"
-    else
-      EXIT_CODE=$?
-      echo "✗ FAILED: pi install exited with code $EXIT_CODE"
-      echo ""
-      echo "Error output:"
-      cat "$STDERR_LOG" || echo "(no error output captured)"
-      rm -f "$STDERR_LOG"
-      echo ""
-      echo "Possible causes:"
-      echo "  1. Pi not configured yet (no ~/.pi/agent/settings.json)"
-      echo "  2. Pi config directory doesn't exist"
-      echo "  3. Permission issues with ~/.pi/agent/"
-      echo "  4. Pi binary not compatible with this system"
-      echo ""
-      echo "Manual installation steps:"
-      echo "  1. Ensure pi is installed and working:"
-      echo "       pi --version"
-      echo "  2. Run pi install manually:"
-      echo "       pi install $out"
-      echo "  3. Or add to settings.json manually:"
-      echo "       echo '{\"packages\":[\"$out\"]}' > ~/.pi/agent/settings.json"
-      echo ""
-      echo "The package is still installed at: $out"
-      echo "Extensions will work once registered with pi."
-    fi
-    echo "════════════════════════════════════════════════════════════"
-  '';
+  # Note: Automatic installation via 'pi install' cannot happen during Nix build
+  # because the build runs in a sandbox without access to ~/.pi/agent/settings.json
+  # 
+  # For automatic installation, use the Home Manager module instead:
+  #   programs.pi.extensions.pi-agent-extensions.enable = true;
+  # 
+  # For manual installation after building:
+  #   nix build .#pi-agent-extensions
+  #   pi install ./result
 
   meta = with pkgs.lib; {
     description = "A collection of pi coding agent extensions";
