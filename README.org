@@ -241,40 +241,69 @@ direnv ✗
 
 #+html:</details>
 
+** 📦 Installation
+
+Choose one of the following methods:
+
+*** Method 1: Install via pi Package Manager (Recommended)
+
+#+begin_src bash
+pi install git:github/rytswd/pi-agent-extensions
+#+end_src
+
+This automatically installs the package and makes all extensions available to pi.
+
+*** Method 2: Manual Installation via Git Clone
+
+1. Clone the repository to any directory:
+
+#+begin_src bash
+git clone https://github.com/rytswd/pi-agent-extensions.git ~/path/to/pi-agent-extensions
+#+end_src
+
+2. Add the package to pi's configuration by editing =~/.pi/agent/settings.json=:
+
+#+begin_src json
+{
+  "packages": [
+    "/absolute/path/to/pi-agent-extensions"
+  ]
+}
+#+end_src
+
+** ⚙️ Configuration
+
+Once installed, pi can use *all* of the extensions listed in this package's =package.json=:
+- =direnv=
+- =questionnaire=
+- =slow-mode=
+- =@marckrenn/pi-sub-core= (subscription management)
+- =@marckrenn/pi-sub-bar= (subscription status bar)
+
+*By default, all extensions are enabled.*
+
+To enable or disable specific extensions:
+
+#+begin_src bash
+pi config
+#+end_src
+
+This opens pi's configuration interface where you can toggle individual extensions on/off.
+
 ** 🚀 Quick Start
 
-*** 1. Clone to pi Extensions Directory
-
-#+begin_src bash
-git clone git@github.com:rytswd/pi-agent-extensions.git ~/.pi/agent/extensions
-#+end_src
-
-If you already have =~/.pi/agent/extensions/=, you can cherry-pick individual files instead.
-
-*** 2. Install Dependencies
-
-Some extensions require third-party packages (e.g., =slow-mode= requires =diff= for proper unified diff generation):
-
-#+begin_src bash
-cd ~/.pi/agent/extensions/slow-mode
-bun install
-#+end_src
-
-This installs packages specified in =slow-mode/package.json=.
-
-*** 3. Use pi as Normal
-
-Extensions are auto-discovered. Start pi in any project directory and they'll be loaded automatically.
+After installation, start using pi normally:
 
 #+begin_src bash
 pi
 #+end_src
 
-*** 4. Try the Extensions
+*** Try the Extensions
 
 - *slow-mode:* Type =/slow-mode= to toggle the review gate
 - *questionnaire:* The LLM will call it automatically when needed
 - *direnv:* Watch the status bar — it loads automatically if you have =.envrc= files
+- *subscription tools:* Use =sub_get_usage= and =sub_get_all_usage= tools, see status in the bar
 
 ** 📁 Structure
 
