@@ -1,4 +1,4 @@
-{ pkgs }:
+{ pkgs, pi ? null }:
 
 let
   # Get the root of the project (three levels up from nix/packages/pi-agent-extensions/)
@@ -46,57 +46,18 @@ pkgs.buildNpmPackage rec {
     cp LICENSE $out/
     cp README.org $out/
 
-    # Create a simple setup script
-    cat > $out/setup.sh << 'EOF'
-#!/usr/bin/env bash
-# pi-agent-extensions setup script
-# This script adds this package to pi's configuration
-
-set -e
-
-PI_CONFIG="$HOME/.pi/agent/settings.json"
-PACKAGE_PATH="$(cd "$(dirname "$0")" && pwd)"
-
-# Create config directory if it doesn't exist
-mkdir -p "$(dirname "$PI_CONFIG")"
-
-# Initialize settings.json if it doesn't exist
-if [ ! -f "$PI_CONFIG" ]; then
-  echo '{"packages": []}' > "$PI_CONFIG"
-fi
-
-# Check if package is already configured
-if grep -q "\"$PACKAGE_PATH\"" "$PI_CONFIG" 2>/dev/null; then
-  echo "✓ pi-agent-extensions already configured at: $PACKAGE_PATH"
-  exit 0
-fi
-
-# Add package to settings.json
-if command -v jq >/dev/null 2>&1; then
-  # Use jq if available for proper JSON manipulation
-  TMP=$(mktemp)
-  jq --arg path "$PACKAGE_PATH" '.packages += [$path]' "$PI_CONFIG" > "$TMP"
-  mv "$TMP" "$PI_CONFIG"
-else
-  # Fallback: simple append (assumes packages array exists)
-  echo "Warning: jq not found, using simple append method"
-  sed -i.bak "s|\"packages\": \[|\"packages\": [\n    \"$PACKAGE_PATH\",|" "$PI_CONFIG"
-  rm -f "$PI_CONFIG.bak"
-fi
-
-echo "✓ Added pi-agent-extensions to $PI_CONFIG"
-echo ""
-echo "Package path: $PACKAGE_PATH"
-echo ""
-echo "Extensions are now available. Start pi to use them:"
-echo "  pi"
-echo ""
-echo "To configure individual extensions:"
-echo "  pi config"
-EOF
-    chmod +x $out/setup.sh
-
     runHook postInstall
+  '';
+
+  # Post-installation hook: run 'pi install' if pi binary is available
+  postInstall = pkgs.lib.optionalString (pi != null) ''
+    echo "Running pi install for pi-agent-extensions..."
+    if ${pi}/bin/pi install "$out" 2>/dev/null; then
+      echo "✓ Successfully installed pi-agent-extensions via pi install"
+    else
+      echo "Note: pi install failed or not configured. Extensions installed to $out"
+      echo "You can manually add to ~/.pi/agent/settings.json or run: $out/setup.sh"
+    fi
   '';
 
   meta = with pkgs.lib; {
