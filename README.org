@@ -251,9 +251,13 @@ Choose one of the following methods:
 pi install git:github/rytswd/pi-agent-extensions
 #+end_src
 
-This automatically installs the package and makes all extensions available to pi.
+This command:
+1. Clones the repository to =~/.pi/agent/packages/=
+2. Runs =npm install= to install dependencies
+3. Adds the package path to =~/.pi/agent/settings.json= (="packages"= stanza)
+4. Makes all extensions available to pi automatically
 
-*** Method 2: Manual Installation via Git Clone
+*** Method 2: Manual Installation via Git Clone + Package Configuration
 
 1. Clone the repository to any directory:
 
@@ -270,6 +274,32 @@ git clone https://github.com/rytswd/pi-agent-extensions.git ~/path/to/pi-agent-e
   ]
 }
 #+end_src
+
+*** Method 3: Copy Individual Extensions
+
+For selective installation, copy specific extension directories to =~/.pi/agent/extensions/=:
+
+#+begin_src bash
+# Copy only the extensions you want
+cp -r /path/to/pi-agent-extensions/slow-mode ~/.pi/agent/extensions/
+cp -r /path/to/pi-agent-extensions/direnv ~/.pi/agent/extensions/
+cp -r /path/to/pi-agent-extensions/questionnaire ~/.pi/agent/extensions/
+#+end_src
+
+Or clone directly to the extensions directory:
+
+#+begin_src bash
+git clone https://github.com/rytswd/pi-agent-extensions.git ~/.pi/agent/extensions/pi-agent-extensions
+#+end_src
+
+*Note:* If an extension has dependencies (e.g., =slow-mode= requires the =diff= package), you'll need to install them:
+
+#+begin_src bash
+cd ~/.pi/agent/extensions/slow-mode
+bun install
+#+end_src
+
+Extensions are auto-discovered from =~/.pi/agent/extensions/= — pi loads all =*.ts= files and =index.ts= files in subdirectories.
 
 ** ⚙️ Configuration
 
