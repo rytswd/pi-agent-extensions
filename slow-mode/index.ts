@@ -22,7 +22,6 @@ import type {
   ExtensionContext,
 } from "@mariozechner/pi-coding-agent";
 import { Text, truncateToWidth } from "@mariozechner/pi-tui";
-import { createTwoFilesPatch } from "diff";
 
 export default function slowMode(pi: ExtensionAPI) {
   // State: whether slow mode is currently enabled
@@ -571,37 +570,253 @@ export default function slowMode(pi: ExtensionAPI) {
   }
 
   ////----------------------------------------
-  ///     Diff generation
+  ///     Diff generation (Myers algorithm)
   //------------------------------------------
 
   /**
-   * Generate a unified diff from old and new text using the 'diff' library
+   * Generate a unified diff using the Myers diff algorithm.
    *
-   * Uses the Myers diff algorithm to produce a proper unified diff with
-   * context lines, showing only the changed sections rather than treating
-   * all old lines as removed and all new lines as added.
+   * Replaces the external 'diff' npm package with a zero-dependency
+   * implementation. Produces output equivalent to `diff -u` / `git diff`.
    *
-   * This produces similar output to git diff and pi's own diff rendering.
-   *
-   * @param filePath - Relative file path
+   * @param filePath - Relative file path (used in --- / +++ headers)
    * @param oldText - Original text
    * @param newText - Modified text
+   * @param contextLines - Number of context lines around changes (default: 3)
    * @returns Unified diff string
    */
   function generateUnifiedDiff(
     filePath: string,
     oldText: string,
     newText: string,
+    contextLines = 3,
   ): string {
-    return createTwoFilesPatch(
-      filePath,
-      filePath,
-      oldText,
-      newText,
-      undefined,
-      undefined,
-      { context: 3 },
-    );
+    const oldLines = oldText.split("\n");
+    const newLines = newText.split("\n");
+    const edits = myersDiff(oldLines, newLines);
+    const hunks = buildHunks(edits, contextLines);
+
+    const out: string[] = [];
+    out.push(`--- ${filePath}`);
+    out.push(`+++ ${filePath}`);
+
+    for (const hunk of hunks) {
+      out.push(
+        `@@ -${hunk.oldStart},${hunk.oldCount} +${hunk.newStart},${hunk.newCount} @@`,
+      );
+      for (const line of hunk.lines) {
+        out.push(line);
+      }
+    }
+
+    return out.join("\n");
+  }
+
+  /**
+   * Edit operation in a diff: keep, insert, or delete a line.
+   */
+  type Edit =
+    | { type: "keep"; line: string }
+    | { type: "insert"; line: string }
+    | { type: "delete"; line: string };
+
+  /**
+   * Myers diff algorithm (linear-space variant).
+   *
+   * Computes the shortest edit script (SES) between two arrays of lines.
+   * Time: O((N+M)D) where D is the edit distance.
+   * Space: O((N+M)D) for the trace (acceptable for code diffs).
+   *
+   * Reference: Eugene W. Myers, "An O(ND) Difference Algorithm and Its
+   * Variations", Algorithmica 1(2), 1986.
+   */
+  function myersDiff(oldLines: string[], newLines: string[]): Edit[] {
+    const n = oldLines.length;
+    const m = newLines.length;
+    const max = n + m;
+
+    // V[k] = furthest x-position reached on diagonal k
+    // Diagonals range from -max..+max, offset by max for array indexing
+    const size = 2 * max + 1;
+    const v = new Int32Array(size);
+    v[max + 1] = 0;
+
+    // Store each V snapshot to reconstruct the path
+    const trace: Int32Array[] = [];
+
+    outer:
+    for (let d = 0; d <= max; d++) {
+      // Save current state before modification
+      trace.push(v.slice());
+
+      for (let k = -d; k <= d; k += 2) {
+        const kIdx = k + max;
+
+        // Decide whether to move down (insert) or right (delete)
+        let x: number;
+        if (k === -d || (k !== d && v[kIdx - 1] < v[kIdx + 1])) {
+          x = v[kIdx + 1]; // move down: take x from diagonal k+1
+        } else {
+          x = v[kIdx - 1] + 1; // move right: take x from diagonal k-1 and advance
+        }
+        let y = x - k;
+
+        // Follow the diagonal (matching lines)
+        while (x < n && y < m && oldLines[x] === newLines[y]) {
+          x++;
+          y++;
+        }
+
+        v[kIdx] = x;
+
+        // Reached the end of both sequences
+        if (x >= n && y >= m) {
+          break outer;
+        }
+      }
+    }
+
+    // Backtrack through the trace to reconstruct the edit script
+    const edits: Edit[] = [];
+    let x = n;
+    let y = m;
+
+    for (let d = trace.length - 1; d >= 0; d--) {
+      const prev = trace[d];
+      const k = x - y;
+      const kIdx = k + max;
+
+      // Determine which diagonal we came from
+      let prevK: number;
+      if (k === -d || (k !== d && prev[kIdx - 1] < prev[kIdx + 1])) {
+        prevK = k + 1; // came from above (insert)
+      } else {
+        prevK = k - 1; // came from left (delete)
+      }
+
+      const prevX = prev[prevK + max];
+      const prevY = prevX - prevK;
+
+      // Diagonal moves (matching lines) — emit keeps in reverse
+      while (x > prevX && y > prevY) {
+        x--;
+        y--;
+        edits.push({ type: "keep", line: oldLines[x] });
+      }
+
+      if (d > 0) {
+        if (x === prevX) {
+          // Vertical move: insert from new
+          y--;
+          edits.push({ type: "insert", line: newLines[y] });
+        } else {
+          // Horizontal move: delete from old
+          x--;
+          edits.push({ type: "delete", line: oldLines[x] });
+        }
+      }
+    }
+
+    edits.reverse();
+    return edits;
+  }
+
+  /**
+   * A hunk in a unified diff.
+   */
+  interface Hunk {
+    oldStart: number;  // 1-based start line in old file
+    oldCount: number;  // number of old-file lines in hunk
+    newStart: number;  // 1-based start line in new file
+    newCount: number;  // number of new-file lines in hunk
+    lines: string[];   // prefixed lines (" ", "+", "-")
+  }
+
+  /**
+   * Group edit operations into unified diff hunks with context lines.
+   *
+   * Adjacent changes within (2 * contextLines) of each other are merged
+   * into a single hunk, matching standard unified diff behavior.
+   */
+  function buildHunks(edits: Edit[], contextLines: number): Hunk[] {
+    if (edits.length === 0) return [];
+
+    // Find indices of all change operations (insert or delete)
+    const changeIndices: number[] = [];
+    for (let i = 0; i < edits.length; i++) {
+      if (edits[i].type !== "keep") {
+        changeIndices.push(i);
+      }
+    }
+
+    if (changeIndices.length === 0) return [];
+
+    // Group changes that are close enough to share context
+    const groups: { start: number; end: number }[] = [];
+    let groupStart = changeIndices[0];
+    let groupEnd = changeIndices[0];
+
+    for (let i = 1; i < changeIndices.length; i++) {
+      // If gap between changes is <= 2*contextLines, merge into same group
+      if (changeIndices[i] - groupEnd <= 2 * contextLines) {
+        groupEnd = changeIndices[i];
+      } else {
+        groups.push({ start: groupStart, end: groupEnd });
+        groupStart = changeIndices[i];
+        groupEnd = changeIndices[i];
+      }
+    }
+    groups.push({ start: groupStart, end: groupEnd });
+
+    // Convert groups into hunks
+    const hunks: Hunk[] = [];
+
+    for (const group of groups) {
+      // Expand to include context lines
+      const hunkStart = Math.max(0, group.start - contextLines);
+      const hunkEnd = Math.min(edits.length - 1, group.end + contextLines);
+
+      const lines: string[] = [];
+      let oldCount = 0;
+      let newCount = 0;
+
+      // Compute 1-based starting line numbers
+      let oldLine = 1;
+      let newLine = 1;
+      for (let i = 0; i < hunkStart; i++) {
+        if (edits[i].type === "keep" || edits[i].type === "delete") oldLine++;
+        if (edits[i].type === "keep" || edits[i].type === "insert") newLine++;
+      }
+
+      for (let i = hunkStart; i <= hunkEnd; i++) {
+        const edit = edits[i];
+        switch (edit.type) {
+          case "keep":
+            lines.push(` ${edit.line}`);
+            oldCount++;
+            newCount++;
+            break;
+          case "delete":
+            lines.push(`-${edit.line}`);
+            oldCount++;
+            break;
+          case "insert":
+            lines.push(`+${edit.line}`);
+            newCount++;
+            break;
+        }
+      }
+
+      hunks.push({
+        oldStart: oldLine,
+        oldCount,
+        newStart: newLine,
+        newCount,
+        lines,
+      });
+    }
+
+    return hunks;
   }
 
   ////----------------------------------------
