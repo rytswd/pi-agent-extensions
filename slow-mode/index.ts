@@ -13,8 +13,9 @@
  * In non-interactive mode (no UI), slow mode is a no-op.
  */
 
-import { mkdirSync, writeFileSync, unlinkSync, existsSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync, unlinkSync, rmdirSync } from "node:fs";
 import { execFileSync } from "node:child_process";
+import { tmpdir } from "node:os";
 import { dirname, basename, join, resolve, relative } from "node:path";
 import type {
   ExtensionAPI,
@@ -28,8 +29,18 @@ export default function slowMode(pi: ExtensionAPI) {
   let enabled = false;
 
   // Staging directory: stores proposed file changes for review
-  // Uses PID to avoid conflicts between concurrent pi sessions
-  const tmpDir = `/tmp/pi-slow-mode-${process.pid}`;
+  // Uses mkdtempSync for secure, unpredictable temp directory creation
+  // to prevent symlink attacks and tmpdir races
+  const tmpDir = mkdtempSync(join(tmpdir(), "pi-slow-mode-"));
+
+  // Clean up staging directory on session shutdown
+  pi.on("session_shutdown", async () => {
+    try {
+      rmdirSync(tmpDir, { recursive: true } as any);
+    } catch {
+      // Best-effort cleanup
+    }
+  });
 
   ////----------------------------------------
   ///     Toggle command
