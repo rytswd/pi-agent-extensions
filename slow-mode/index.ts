@@ -132,12 +132,15 @@ export default function slowMode(pi: ExtensionAPI) {
     writeFileSync(stagePath, content, "utf-8");
 
     // Show review UI — user decides to approve/reject
+    // Emit event so other extensions can track when user approval is pending
+    pi.events.emit("slow-mode:waiting");
     const approved = await showReview(ctx, {
       operation: "WRITE",
       filePath: relPath,
       stagePath,
       body: content,
     });
+    pi.events.emit("slow-mode:resolved");
 
     // Clean up staged file after decision
     cleanup(stagePath);
@@ -187,6 +190,9 @@ export default function slowMode(pi: ExtensionAPI) {
 
     let approved: boolean;
 
+    // Emit event so other extensions can track when user approval is pending
+    pi.events.emit("slow-mode:waiting");
+
     // Try to open in external diff viewer first (preferred)
     const diffTool = findDiffTool();
     if (diffTool) {
@@ -224,6 +230,8 @@ export default function slowMode(pi: ExtensionAPI) {
         newPath,
       });
     }
+
+    pi.events.emit("slow-mode:resolved");
 
     // Clean up staged files after decision
     cleanup(oldPath);
