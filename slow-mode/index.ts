@@ -13,7 +13,7 @@
  * In non-interactive mode (no UI), slow mode is a no-op.
  */
 
-import { mkdirSync, mkdtempSync, writeFileSync, unlinkSync, rmdirSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync, unlinkSync, rmSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { dirname, basename, join, resolve, relative } from "node:path";
@@ -35,7 +35,7 @@ export default function slowMode(pi: ExtensionAPI) {
   // Clean up staging directory on session shutdown
   pi.on("session_shutdown", async () => {
     try {
-      rmdirSync(tmpDir, { recursive: true } as any);
+      rmSync(tmpDir, { recursive: true });
     } catch {
       // Best-effort cleanup
     }
