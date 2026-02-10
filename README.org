@@ -252,6 +252,62 @@ Tab/←→ navigate • ↑↓ select • Enter confirm • Esc cancel
 #+html:</details>
 
 #+html:<details>
+#+html:<summary><strong>fetch</strong> - HTTP request tool without bash/curl</summary>
+#+html:<br>
+
+- *Source*: [[https://github.com/rytswd/pi-agent-extensions/tree/main/fetch][fetch/]]
+- *License*: MIT
+- *Type*: Tool (LLM-callable)
+- *Use cases*: Fetching web pages, calling APIs, downloading files
+
+*Description*: Registers a native =fetch= tool that the LLM can use for HTTP requests without relying on =bash= or =curl=. Uses Node.js built-in =fetch= — no external dependencies.
+
+*Features*:
+- =GET=, =POST=, =PUT=, =PATCH=, =DELETE=, =HEAD= methods
+- Custom request headers and body
+- Configurable timeout (default 30s) and response truncation (default 100KB)
+- Binary download to file via =outputPath= parameter
+- =outputPath= restricted to =/tmp/= when =write= tool is not enabled
+- Curl equivalent shown on expand (=Ctrl+O=)
+- Red error strip for HTTP 4xx/5xx, timeouts, and blocked writes
+
+*Rendering*:
+
+Tool call display:
+
+#+begin_example
+fetch GET https://api.example.com/data
+fetch POST https://api.example.com/submit
+fetch GET https://example.com/logo.png → /tmp/logo.png
+#+end_example
+
+Collapsed result:
+
+#+begin_example
+200 OK · 12.3KB
+200 OK · 47.1KB → /tmp/logo.png
+#+end_example
+
+Expanded result (=Ctrl+O=) shows curl equivalent:
+
+#+begin_example
+$ curl -X POST \
+    -H 'Content-Type: application/json' \
+    -d '{"query":"test"}' \
+    'https://api.example.com/search'
+#+end_example
+
+Errors show with red background:
+
+#+begin_example
+✗ 404 Not Found: https://example.com/missing
+✗ Timed out after 30000ms: https://slow.example.com
+✗ outputPath restricted to /tmp/ when write tool is not enabled.
+#+end_example
+
+#+html:</details>
+
+#+html:<details>
 #+html:<summary><strong>direnv</strong> - Auto-loads environment variables from <code>.envrc</code> files</summary>
 #+html:<br>
 
@@ -343,6 +399,7 @@ Resource Configuration                     space toggle · esc close
 >     [x] direnv/index.ts
       [x] pi-sub-bar/index.ts
       [x] pi-sub-core/index.ts
+      [x] fetch/index.ts
       [x] questionnaire/index.ts
       [x] slow-mode/index.ts
 
@@ -376,6 +433,7 @@ pi
 *** Try the Extensions
 
 - *slow-mode:* Type =/slow-mode= to toggle the review gate
+- *fetch:* The LLM will use it for HTTP requests — try asking it to fetch a URL
 - *questionnaire:* The LLM will call it automatically when needed
 - *direnv:* Watch the status bar — it loads automatically if you have =.envrc= files
 - *subscription tools:* Use =sub_get_usage= and =sub_get_all_usage= tools, see status in the bar
@@ -385,6 +443,8 @@ pi
 #+begin_example
 ~/.pi/agent/extensions/
 ├── direnv/             # Direnv integration
+│   └── index.ts
+├── fetch/              # HTTP request tool
 │   └── index.ts
 ├── questionnaire/      # Multi-question tool
 │   └── index.ts
