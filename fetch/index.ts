@@ -13,6 +13,9 @@
  *   - Returns status code, headers, and body
  */
 
+import { writeFile, mkdir } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, resolve } from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
@@ -29,6 +32,7 @@ interface FetchDetails {
   bodyLength: number;
   truncated: boolean;
   curlCommand: string;
+  outputPath?: string;
 }
 
 /** Escape a string for safe use inside single quotes in shell. */
@@ -45,6 +49,7 @@ function toCurl(params: {
   method: string;
   headers?: Record<string, string>;
   body?: string;
+  outputPath?: string;
 }): string {
   const parts: string[] = ["curl"];
 
@@ -62,6 +67,10 @@ function toCurl(params: {
 
   if (params.body) {
     parts.push("-d", shellQuote(params.body));
+  }
+
+  if (params.outputPath) {
+    parts.push("-o", shellQuote(params.outputPath));
   }
 
   parts.push(shellQuote(params.url));
@@ -113,19 +122,42 @@ export default function fetchExtension(pi: ExtensionAPI) {
           description: `Maximum response body size in bytes before truncation (default: ${DEFAULT_MAX_BODY_BYTES})`,
         }),
       ),
+      outputPath: Type.Optional(
+        Type.String({
+          description:
+            "Save response body to this file path instead of returning it. " +
+            "Useful for binary downloads (images, archives, etc.). " +
+            "Parent directories are created automatically.",
+        }),
+      ),
     }),
 
-    async execute(_toolCallId, params, signal, _onUpdate, _ctx) {
+    async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       const method = params.method ?? "GET";
       const timeout = params.timeoutMs ?? DEFAULT_TIMEOUT_MS;
       const maxBody = params.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
+      const outputPath = params.outputPath
+        ? resolve(ctx.cwd, params.outputPath)
+        : undefined;
 
       const curlCommand = toCurl({
         url: params.url,
         method,
         headers: params.headers,
         body: params.body,
+        outputPath,
       });
+
+      // Guard: without write tool, outputPath is restricted to tmpdir
+      if (outputPath && !pi.getActiveTools().includes("write")) {
+        const tmp = tmpdir();
+        if (!outputPath.startsWith(tmp + "/")) {
+          throw new Error(
+            `✗ outputPath restricted to ${tmp}/ when write tool is not enabled. ` +
+            `Use a path under ${tmp}/ or enable the write tool.`,
+          );
+        }
+      }
 
       // Build abort controller that respects both our timeout and the caller's signal
       const controller = new AbortController();
@@ -147,20 +179,56 @@ export default function fetchExtension(pi: ExtensionAPI) {
 
         clearTimeout(timer);
 
-        // Read response body as text, with size limit
         const buffer = await response.arrayBuffer();
         const totalBytes = buffer.byteLength;
-        const truncated = totalBytes > maxBody;
-        const sliced = truncated ? buffer.slice(0, maxBody) : buffer;
-        const bodyText = new TextDecoder("utf-8", { fatal: false }).decode(
-          sliced,
-        );
 
         // Collect response headers
         const responseHeaders: Record<string, string> = {};
         response.headers.forEach((value, key) => {
           responseHeaders[key] = value;
         });
+
+        // HTTP errors: throw so pi renders with red toolErrorBg
+        if (!response.ok) {
+          throw new Error(
+            `✗ ${response.status} ${response.statusText}: ${params.url}`,
+          );
+        }
+
+        // Save to file: write bytes to disk, return metadata only
+        if (outputPath) {
+          await mkdir(dirname(outputPath), { recursive: true });
+          await writeFile(outputPath, Buffer.from(buffer));
+
+          const details: FetchDetails = {
+            url: params.url,
+            method,
+            status: response.status,
+            statusText: response.statusText,
+            headers: responseHeaders,
+            bodyLength: totalBytes,
+            truncated: false,
+            curlCommand,
+            outputPath,
+          };
+
+          const lines: string[] = [
+            `HTTP ${response.status} ${response.statusText}`,
+            `Saved ${totalBytes} bytes to ${outputPath}`,
+          ];
+
+          return {
+            content: [{ type: "text", text: lines.join("\n") }],
+            details,
+          };
+        }
+
+        // Return as text: truncate if needed
+        const truncated = totalBytes > maxBody;
+        const sliced = truncated ? buffer.slice(0, maxBody) : buffer;
+        const bodyText = new TextDecoder("utf-8", { fatal: false }).decode(
+          sliced,
+        );
 
         const details: FetchDetails = {
           url: params.url,
@@ -179,7 +247,6 @@ export default function fetchExtension(pi: ExtensionAPI) {
           "",
         ];
 
-        // Include selected response headers
         for (const [key, value] of Object.entries(responseHeaders)) {
           lines.push(`${key}: ${value}`);
         }
@@ -199,31 +266,19 @@ export default function fetchExtension(pi: ExtensionAPI) {
       } catch (err: unknown) {
         clearTimeout(timer);
 
-        const message =
-          err instanceof Error ? err.message : "Unknown fetch error";
+        // Re-throw our own errors (HTTP 4xx/5xx) as-is
+        if (err instanceof Error && err.message.startsWith("✗")) {
+          throw err;
+        }
+
         const isTimeout =
           err instanceof DOMException && err.name === "AbortError";
 
-        return {
-          content: [
-            {
-              type: "text",
-              text: isTimeout
-                ? `Fetch timed out after ${timeout}ms: ${params.url}`
-                : `Fetch error: ${message}`,
-            },
-          ],
-          details: {
-            url: params.url,
-            method,
-            status: 0,
-            statusText: isTimeout ? "Timeout" : "Error",
-            headers: {},
-            bodyLength: 0,
-            truncated: false,
-            curlCommand,
-          } as FetchDetails,
-        };
+        throw new Error(
+          isTimeout
+            ? `✗ Timed out after ${timeout}ms: ${params.url}`
+            : `✗ ${err instanceof Error ? err.message : "Unknown fetch error"}`,
+        );
       }
     },
 
@@ -234,12 +289,15 @@ export default function fetchExtension(pi: ExtensionAPI) {
       text += theme.fg("accent", method);
       text += " ";
       text += theme.fg("muted", url);
+      if (args.outputPath) {
+        text += theme.fg("dim", " → ") + theme.fg("accent", args.outputPath as string);
+      }
       return new Text(text, 0, 0);
     },
 
     renderResult(result, options, theme) {
       const details = result.details as FetchDetails | undefined;
-      if (!details) {
+      if (!details || details.status === undefined) {
         const first = result.content[0];
         return new Text(
           first?.type === "text" ? first.text : "",
@@ -250,6 +308,7 @@ export default function fetchExtension(pi: ExtensionAPI) {
 
       // Collapsed: one-line summary
       if (!options.expanded) {
+        // Normal HTTP response
         const statusColor =
           details.status >= 200 && details.status < 300
             ? "success"
@@ -263,7 +322,11 @@ export default function fetchExtension(pi: ExtensionAPI) {
         let text = theme.fg(statusColor, `${details.status} `);
         text += theme.fg("muted", details.statusText);
         text += theme.fg("dim", ` · ${sizeStr}`);
-        if (details.truncated) {
+        if (details.outputPath) {
+          text +=
+            theme.fg("dim", " → ") +
+            theme.fg(statusColor, details.outputPath);
+        } else if (details.truncated) {
           text += theme.fg("warning", " (truncated)");
         }
         return new Text(text, 0, 0);
