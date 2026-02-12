@@ -21,7 +21,8 @@ import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
-const DEFAULT_MAX_BODY_BYTES = 100 * 1024; // 100KB
+const DEFAULT_MAX_BODY_BYTES = 5 * 1024 * 1024; // 5MB (download / outputPath)
+const DEFAULT_MAX_RESPONSE_TEXT = 100 * 1024; // 100KB text returned to LLM
 
 interface FetchDetails {
   url: string;
@@ -33,6 +34,7 @@ interface FetchDetails {
   truncated: boolean;
   curlCommand: string;
   outputPath?: string;
+  textOnly?: boolean;
 }
 
 /** Escape a string for safe use inside single quotes in shell. */
@@ -77,6 +79,43 @@ function toCurl(params: {
 
   if (parts.length <= 2) return parts.join(" ");
   return parts[0] + " " + parts.slice(1).join(" \\\n  ");
+}
+
+/**
+ * Strip HTML to plain text.
+ * Removes scripts, styles, and tags while preserving readable structure.
+ */
+function stripHtml(html: string): string {
+  return (
+    html
+      // Remove entire script/style/noscript blocks
+      .replace(/<script[\s\S]*?<\/script>/gi, "")
+      .replace(/<style[\s\S]*?<\/style>/gi, "")
+      .replace(/<noscript[\s\S]*?<\/noscript>/gi, "")
+      // Remove HTML comments
+      .replace(/<!--[\s\S]*?-->/g, "")
+      // Block elements → newlines (before stripping tags)
+      .replace(/<\/?(p|div|br|hr|h[1-6]|li|tr|blockquote|pre|section|article|header|footer|nav|main|aside|details|summary|figcaption|figure|dl|dt|dd)[\s>][^>]*>/gi, "\n")
+      // Strip remaining tags
+      .replace(/<[^>]+>/g, "")
+      // Decode common HTML entities
+      .replace(/&nbsp;/gi, " ")
+      .replace(/&amp;/gi, "&")
+      .replace(/&lt;/gi, "<")
+      .replace(/&gt;/gi, ">")
+      .replace(/&quot;/gi, '"')
+      .replace(/&#0?39;/gi, "'")
+      .replace(/&#(\d+);/gi, (_m, code) =>
+        String.fromCharCode(Number(code)),
+      )
+      // Collapse whitespace within lines
+      .replace(/[ \t]+/g, " ")
+      // Collapse multiple blank lines into one
+      .replace(/\n[ \t]*\n/g, "\n\n")
+      // Trim each line
+      .replace(/^[ \t]+|[ \t]+$/gm, "")
+      .trim()
+  );
 }
 
 export default function fetchExtension(pi: ExtensionAPI) {
@@ -128,6 +167,15 @@ export default function fetchExtension(pi: ExtensionAPI) {
             "Save response body to this file path instead of returning it. " +
             "Useful for binary downloads (images, archives, etc.). " +
             "Parent directories are created automatically.",
+        }),
+      ),
+      textOnly: Type.Optional(
+        Type.Boolean({
+          description:
+            "Strip HTML tags and return plain text. " +
+            "Removes scripts, styles, and markup while preserving readable structure. " +
+            "Default: auto-detects from Content-Type (strips text/html, leaves others as-is). " +
+            "Set true to force strip, false to force raw.",
         }),
       ),
     }),
@@ -223,12 +271,26 @@ export default function fetchExtension(pi: ExtensionAPI) {
           };
         }
 
-        // Return as text: truncate if needed
-        const truncated = totalBytes > maxBody;
-        const sliced = truncated ? buffer.slice(0, maxBody) : buffer;
-        const bodyText = new TextDecoder("utf-8", { fatal: false }).decode(
-          sliced,
+        // Return as text: decode full download, strip if needed, then truncate for LLM
+        let bodyText = new TextDecoder("utf-8", { fatal: false }).decode(
+          buffer,
         );
+
+        // Auto-detect: strip HTML unless explicitly told not to
+        const contentType = responseHeaders["content-type"] || "";
+        const isHtml = contentType.includes("text/html");
+        const stripped =
+          params.textOnly === true || (params.textOnly !== false && isHtml);
+
+        if (stripped) {
+          bodyText = stripHtml(bodyText);
+        }
+
+        const textLimit = DEFAULT_MAX_RESPONSE_TEXT;
+        const truncated = bodyText.length > textLimit;
+        if (truncated) {
+          bodyText = bodyText.slice(0, textLimit);
+        }
 
         const details: FetchDetails = {
           url: params.url,
@@ -239,6 +301,7 @@ export default function fetchExtension(pi: ExtensionAPI) {
           bodyLength: totalBytes,
           truncated,
           curlCommand,
+          textOnly: stripped,
         };
 
         // Format output
@@ -254,7 +317,7 @@ export default function fetchExtension(pi: ExtensionAPI) {
 
         if (truncated) {
           lines.push(
-            `[Body truncated: showing ${maxBody} of ${totalBytes} bytes]`,
+            `[Truncated to ${textLimit} chars for context. Use outputPath to save full response.]`,
           );
         }
         lines.push(bodyText);
@@ -292,6 +355,9 @@ export default function fetchExtension(pi: ExtensionAPI) {
       if (args.outputPath) {
         text += theme.fg("dim", " → ") + theme.fg("accent", args.outputPath as string);
       }
+      if (args.textOnly) {
+        text += theme.fg("dim", " [text]");
+      }
       return new Text(text, 0, 0);
     },
 
@@ -328,6 +394,9 @@ export default function fetchExtension(pi: ExtensionAPI) {
             theme.fg(statusColor, details.outputPath);
         } else if (details.truncated) {
           text += theme.fg("warning", " (truncated)");
+        }
+        if (details.textOnly) {
+          text += theme.fg("dim", " [text]");
         }
         return new Text(text, 0, 0);
       }
