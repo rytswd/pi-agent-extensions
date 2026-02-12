@@ -1,0 +1,8 @@
+{
+  "name": "pae-fetch",
+  "type": "module",
+  "dependencies": {
+    "@mozilla/readability": "^0.5.0",
+    "jsdom": "^26.0.0"
+  }
+}
