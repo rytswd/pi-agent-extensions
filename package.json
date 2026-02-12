@@ -24,6 +24,7 @@
   "pi": {
     "extensions": [
       "direnv",
+      "fetch",
       "questionnaire", 
       "slow-mode",
       "node_modules/@marckrenn/pi-sub-core",
