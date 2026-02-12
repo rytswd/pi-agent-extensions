@@ -11,6 +11,7 @@
  *   - Response truncation for large payloads (configurable, default 100KB)
  *   - Follows redirects automatically
  *   - Returns status code, headers, and body
+ *   - Readability mode for extracting main content from web pages
  */
 
 import { writeFile, mkdir } from "node:fs/promises";
@@ -19,10 +20,13 @@ import { dirname, resolve } from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
+import { Readability } from "@mozilla/readability";
+import { JSDOM } from "jsdom";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_BODY_BYTES = 5 * 1024 * 1024; // 5MB (download / outputPath)
 const DEFAULT_MAX_RESPONSE_TEXT = 100 * 1024; // 100KB text returned to LLM
+const MIN_READABILITY_CONTENT_LENGTH = 200; // Minimum chars for readability to be considered successful
 
 interface FetchDetails {
   url: string;
@@ -35,6 +39,9 @@ interface FetchDetails {
   curlCommand: string;
   outputPath?: string;
   textOnly?: boolean;
+  readability?: boolean;
+  readabilityMethod?: "mozilla" | "simple" | "failed";
+  readabilityWarning?: string;
 }
 
 /** Escape a string for safe use inside single quotes in shell. */
@@ -79,6 +86,83 @@ function toCurl(params: {
 
   if (parts.length <= 2) return parts.join(" ");
   return parts[0] + " " + parts.slice(1).join(" \\\n  ");
+}
+
+/**
+ * Extract main article content from HTML using simple heuristics.
+ * Removes navigation, sidebars, headers, footers before processing.
+ * Returns extracted HTML (not yet converted to text).
+ */
+function extractMainContentSimple(html: string): string {
+  let processed = html;
+  
+  // Remove common UI elements that aren't part of the main content
+  processed = processed
+    // Remove navigation sections
+    .replace(/<nav[\s\S]*?<\/nav>/gi, "")
+    // Remove sidebars
+    .replace(/<aside[\s\S]*?<\/aside>/gi, "")
+    // Remove page headers (but keep article headers)
+    .replace(/<header[^>]*class="[^"]*(?:site|page|navbar|top|global)[^"]*"[\s\S]*?<\/header>/gi, "")
+    .replace(/<header[^>]*id="[^"]*(?:site|page|navbar|top|global)[^"]*"[\s\S]*?<\/header>/gi, "")
+    // Remove page footers
+    .replace(/<footer[\s\S]*?<\/footer>/gi, "")
+    // Remove common sidebar/navigation class patterns
+    .replace(/<div[^>]*class="[^"]*(?:sidebar|nav-|navigation|menu|drawer|toc|breadcrumb|td-sidebar)[^"]*"[\s\S]*?<\/div>/gi, "")
+    // Remove common id patterns for navigation
+    .replace(/<div[^>]*id="[^"]*(?:sidebar|navigation|nav-|menu|toc|td-sidebar)[^"]*"[\s\S]*?<\/div>/gi, "")
+    // Remove forms (usually search, login, etc.)
+    .replace(/<form[\s\S]*?<\/form>/gi, "");
+  
+  // Try to extract the main content area if it exists
+  // Look for <main>, <article>, or common content wrappers
+  const mainMatch = processed.match(/<main[\s\S]*?>([\s\S]*?)<\/main>/i);
+  if (mainMatch) {
+    return mainMatch[1];
+  }
+  
+  const articleMatch = processed.match(/<article[\s\S]*?>([\s\S]*?)<\/article>/i);
+  if (articleMatch) {
+    return articleMatch[1];
+  }
+  
+  // Look for common content div patterns
+  const contentMatch = processed.match(/<div[^>]*(?:class|id)="[^"]*(?:content|main|article|post|entry|td-content)[^"]*"[\s\S]*?>([\s\S]*?)<\/div>/i);
+  if (contentMatch) {
+    return contentMatch[1];
+  }
+  
+  // If no main content area found, return the processed HTML with UI elements removed
+  return processed;
+}
+
+/**
+ * Extract readable content using Mozilla's Readability algorithm.
+ * This is the same algorithm used in Firefox Reader Mode.
+ * Returns { content: string, method: string, title?: string } or null on failure.
+ */
+function extractWithMozillaReadability(html: string, url: string): { 
+  content: string; 
+  method: "mozilla"; 
+  title?: string;
+} | null {
+  try {
+    const dom = new JSDOM(html, { url });
+    const reader = new Readability(dom.window.document);
+    const article = reader.parse();
+    
+    if (article && article.textContent && article.textContent.length > MIN_READABILITY_CONTENT_LENGTH) {
+      return {
+        content: article.textContent,
+        method: "mozilla",
+        title: article.title,
+      };
+    }
+    return null;
+  } catch (error) {
+    // If Mozilla Readability fails, return null to try simple extraction
+    return null;
+  }
 }
 
 /**
@@ -176,6 +260,15 @@ export default function fetchExtension(pi: ExtensionAPI) {
             "Removes scripts, styles, and markup while preserving readable structure. " +
             "Default: auto-detects from Content-Type (strips text/html, leaves others as-is). " +
             "Set true to force strip, false to force raw.",
+        }),
+      ),
+      readability: Type.Optional(
+        Type.Boolean({
+          description:
+            "Extract main article content only, removing navigation, sidebars, headers, and footers. " +
+            "Uses Mozilla Readability (Firefox Reader Mode algorithm) with fallback to simple extraction. " +
+            "Best for blogs, articles, and documentation. " +
+            "If extraction yields insufficient content, re-fetch with readability=false.",
         }),
       ),
     }),
@@ -279,11 +372,45 @@ export default function fetchExtension(pi: ExtensionAPI) {
         // Auto-detect: strip HTML unless explicitly told not to
         const contentType = responseHeaders["content-type"] || "";
         const isHtml = contentType.includes("text/html");
-        const stripped =
-          params.textOnly === true || (params.textOnly !== false && isHtml);
+        
+        // Track readability processing
+        let readabilityUsed = false;
+        let readabilityMethod: "mozilla" | "simple" | "failed" | undefined;
+        let readabilityWarning: string | undefined;
+        let articleTitle: string | undefined;
 
-        if (stripped) {
-          bodyText = stripHtml(bodyText);
+        // Apply readability extraction if requested and content is HTML
+        if (params.readability && isHtml) {
+          readabilityUsed = true;
+          
+          // Try Mozilla Readability first
+          const mozillaResult = extractWithMozillaReadability(bodyText, params.url);
+          if (mozillaResult) {
+            bodyText = mozillaResult.content;
+            readabilityMethod = "mozilla";
+            articleTitle = mozillaResult.title;
+          } else {
+            // Fallback to simple extraction
+            const extractedHtml = extractMainContentSimple(bodyText);
+            bodyText = stripHtml(extractedHtml);
+            readabilityMethod = "simple";
+          }
+          
+          // Check if readability extraction yielded enough content
+          if (bodyText.length < MIN_READABILITY_CONTENT_LENGTH) {
+            readabilityMethod = "failed";
+            readabilityWarning = 
+              `Readability extraction yielded only ${bodyText.length} chars (minimum: ${MIN_READABILITY_CONTENT_LENGTH}). ` +
+              `Re-fetch with readability=false to get full page content.`;
+          }
+        } else {
+          // Normal text-only stripping
+          const stripped =
+            params.textOnly === true || (params.textOnly !== false && isHtml);
+
+          if (stripped) {
+            bodyText = stripHtml(bodyText);
+          }
         }
 
         const textLimit = DEFAULT_MAX_RESPONSE_TEXT;
@@ -301,7 +428,10 @@ export default function fetchExtension(pi: ExtensionAPI) {
           bodyLength: totalBytes,
           truncated,
           curlCommand,
-          textOnly: stripped,
+          textOnly: !readabilityUsed && (params.textOnly === true || (params.textOnly !== false && isHtml)),
+          readability: readabilityUsed,
+          readabilityMethod,
+          readabilityWarning,
         };
 
         // Format output
@@ -314,6 +444,17 @@ export default function fetchExtension(pi: ExtensionAPI) {
           lines.push(`${key}: ${value}`);
         }
         lines.push("");
+
+        // Add readability info if used
+        if (readabilityUsed && articleTitle) {
+          lines.push(`Article: ${articleTitle}`);
+          lines.push("");
+        }
+
+        if (readabilityWarning) {
+          lines.push(`⚠️  ${readabilityWarning}`);
+          lines.push("");
+        }
 
         if (truncated) {
           lines.push(
@@ -355,7 +496,9 @@ export default function fetchExtension(pi: ExtensionAPI) {
       if (args.outputPath) {
         text += theme.fg("dim", " → ") + theme.fg("accent", args.outputPath as string);
       }
-      if (args.textOnly) {
+      if (args.readability) {
+        text += theme.fg("accent", " [readability]");
+      } else if (args.textOnly) {
         text += theme.fg("dim", " [text]");
       }
       return new Text(text, 0, 0);
@@ -395,8 +538,17 @@ export default function fetchExtension(pi: ExtensionAPI) {
         } else if (details.truncated) {
           text += theme.fg("warning", " (truncated)");
         }
-        if (details.textOnly) {
+        if (details.readability) {
+          if (details.readabilityMethod === "failed") {
+            text += theme.fg("error", " [readability: failed]");
+          } else {
+            text += theme.fg("accent", ` [readability: ${details.readabilityMethod}]`);
+          }
+        } else if (details.textOnly) {
           text += theme.fg("dim", " [text]");
+        }
+        if (details.readabilityWarning) {
+          text += theme.fg("warning", " ⚠️");
         }
         return new Text(text, 0, 0);
       }
