@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "description": "A collection of pi coding agent extensions",
   "type": "module",
+  "workspaces": [
+    "fetch"
+  ],
   "keywords": ["pi-package"],
   "author": "rytswd",
   "license": "MIT",
@@ -12,9 +15,7 @@
   },
   "dependencies": {
     "@marckrenn/pi-sub-core": "*",
-    "@marckrenn/pi-sub-bar": "*",
-    "@mozilla/readability": "^0.5.0",
-    "jsdom": "^25.0.1"
+    "@marckrenn/pi-sub-bar": "*"
   },
   "peerDependencies": {
     "@mariozechner/pi-ai": "*",

@@ -20,8 +20,16 @@ import { dirname, resolve } from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
-import { Readability } from "@mozilla/readability";
-import { JSDOM } from "jsdom";
+// Lazy-loaded: gracefully degrades if not installed (bun install)
+let Readability: typeof import("@mozilla/readability").Readability | null = null;
+let JSDOM: typeof import("jsdom").JSDOM | null = null;
+
+try {
+  ({ Readability } = await import("@mozilla/readability"));
+  ({ JSDOM } = await import("jsdom"));
+} catch {
+  // Dependencies not installed — readability mode unavailable, falls back to simple extraction
+}
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_BODY_BYTES = 5 * 1024 * 1024; // 5MB (download / outputPath)
@@ -147,6 +155,7 @@ function extractWithMozillaReadability(html: string, url: string): {
   title?: string;
 } | null {
   try {
+    if (!Readability || !JSDOM) return null;
     const dom = new JSDOM(html, { url });
     const reader = new Readability(dom.window.document);
     const article = reader.parse();
