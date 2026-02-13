@@ -53,9 +53,11 @@ This command:
 
 #+begin_src bash
   cd ~/path/to/pi-agent-extensions
-  npm install
-  # or: bun install
+  bun install
+  # or: pnpm install
 #+end_src
+
+This uses workspaces to install extension-specific dependencies (e.g., =@mozilla/readability= and =jsdom= for the =fetch= extension). Extensions gracefully degrade if their dependencies are not installed — for example, fetch falls back to simple regex-based HTML stripping when Readability is unavailable.
 
 3. Add the package to pi's configuration by editing =~/.pi/agent/settings.json=:
 
@@ -260,7 +262,9 @@ Tab/←→ navigate • ↑↓ select • Enter confirm • Esc cancel
 - *Type*: Tool (LLM-callable)
 - *Use cases*: Fetching web pages, calling APIs, downloading files
 
-*Description*: Registers a native =fetch= tool that the LLM can use for HTTP requests without relying on =bash= or =curl=. Uses Node.js built-in =fetch= — no external dependencies.
+- *Optional dependencies*: =@mozilla/readability=, =jsdom= (for Readability mode — installed via =bun install= at root)
+
+*Description*: Registers a native =fetch= tool that the LLM can use for HTTP requests without relying on =bash= or =curl=. Uses Node.js built-in =fetch=. Optionally uses Mozilla Readability for intelligent content extraction from HTML pages. Without dependencies, falls back to regex-based HTML stripping.
 
 *Features*:
 - =GET=, =POST=, =PUT=, =PATCH=, =DELETE=, =HEAD= methods
