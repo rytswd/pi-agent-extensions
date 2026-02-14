@@ -6,9 +6,16 @@
  *
  * - Write: stages the new file in /tmp, shows content for review.
  * - Edit: stages old/new files in /tmp, shows inline diff for review.
- * - Ctrl+O opens the staged files in an external diff viewer.
+ * - Ctrl+O opens the staged files in an external editor/diff viewer.
+ * - User can edit the staged files directly; changes are reflected in the final output.
  * - Toggle with /slow-mode command.
  * - Status bar shows "slow ■" when active.
+ *
+ * When content is edited:
+ * - The actual write/edit operation uses the edited content
+ * - A note is appended to the tool result indicating content was modified
+ * - The collapsed snippet shows the original LLM proposal (not the edited version)
+ *   This is intentional - it shows what the LLM wanted vs. what was actually applied
  *
  * In non-interactive mode (no UI), slow mode is a no-op.
  */
@@ -26,6 +33,14 @@ import { Text, truncateToWidth } from "@mariozechner/pi-tui";
 export default function slowMode(pi: ExtensionAPI) {
   // State: whether slow mode is currently enabled
   let enabled = false;
+
+  // Track tool calls where content was edited
+  // Maps toolCallId -> { originalContent, editedContent }
+  const editedCalls = new Map<string, { original: string; edited: string }>();
+
+  // Track the current tool call being processed for rendering
+  // This allows renderCall to access edited content during the same call
+  let currentToolCallId: string | null = null;
 
   // Staging directory: stores proposed file changes for review
   // Uses mkdtempSync for secure, unpredictable temp directory creation
@@ -80,15 +95,47 @@ export default function slowMode(pi: ExtensionAPI) {
 
     // Intercept write tool calls
     if (event.toolName === "write") {
-      return await reviewWrite(event.input, ctx);
+      return await reviewWrite(event.toolCallId, event.input, ctx);
     }
 
     // Intercept edit tool calls
     if (event.toolName === "edit") {
-      return await reviewEdit(event.input, ctx);
+      return await reviewEdit(event.toolCallId, event.input, ctx);
     }
 
     // All other tools pass through unchanged
+  });
+
+  // Hook into tool_result event — fires AFTER tool execution
+  // Add a note when content was edited in slow mode
+  pi.on("tool_result", async (event, ctx) => {
+    if (!enabled || !ctx.hasUI) return;
+
+    const edited = editedCalls.get(event.toolCallId);
+    if (!edited) return;
+
+    // Clean up the tracking entry
+    editedCalls.delete(event.toolCallId);
+
+    // Calculate diff stats
+    const originalLines = edited.original.split('\n').length;
+    const editedLines = edited.edited.split('\n').length;
+    const lineDiff = editedLines - originalLines;
+    const lineDiffText = lineDiff > 0 
+      ? `+${lineDiff} lines` 
+      : lineDiff < 0 
+      ? `${lineDiff} lines` 
+      : 'same line count';
+
+    // Add a note to the result indicating content was edited
+    const note = {
+      type: "text" as const,
+      text: `\n\n**Note:** Content was modified in slow mode review before writing (${lineDiffText}).`,
+    };
+
+    return {
+      content: [...(event.content || []), note],
+    };
   });
 
   ////----------------------------------------
@@ -112,8 +159,11 @@ export default function slowMode(pi: ExtensionAPI) {
    * 3. User approves → return undefined (tool proceeds)
    * 4. User rejects → return { block: true } (tool aborted)
    * 5. Cleanup staged file
+   * 
+   * If user edits content in external editor, the modified content is used.
    */
   async function reviewWrite(
+    toolCallId: string,
     input: Record<string, unknown>,
     ctx: ExtensionContext,
   ) {
@@ -139,8 +189,27 @@ export default function slowMode(pi: ExtensionAPI) {
       filePath: relPath,
       stagePath,
       body: content,
+      allowEdit: true,
     });
     pi.events.emit("slow-mode:resolved");
+
+    if (approved) {
+      // Read back the staged file in case user edited it
+      try {
+        const { readFileSync } = await import("node:fs");
+        const editedContent = readFileSync(stagePath, "utf-8");
+        
+        // If content changed, update the input parameter and track the edit
+        if (editedContent !== content) {
+          input.content = editedContent;
+          editedCalls.set(toolCallId, { original: content, edited: editedContent });
+          ctx.ui.notify("Using edited content", "info");
+        }
+      } catch (err) {
+        // If we can't read the file, use original content
+        // (file might have been deleted, which is fine)
+      }
+    }
 
     // Clean up staged file after decision
     cleanup(stagePath);
@@ -150,7 +219,7 @@ export default function slowMode(pi: ExtensionAPI) {
       return { block: true, reason: "User rejected the write in slow mode review." };
     }
 
-    // Approved: return undefined → tool proceeds normally
+    // Approved: return undefined → tool proceeds with potentially modified content
   }
 
   /**
@@ -164,8 +233,11 @@ export default function slowMode(pi: ExtensionAPI) {
    * 5. User approves → return undefined (tool proceeds)
    * 6. User rejects → return { block: true } (tool aborted)
    * 7. Cleanup both staged files
+   * 
+   * If user edits the new file in external editor, the modified content is used.
    */
   async function reviewEdit(
+    toolCallId: string,
     input: Record<string, unknown>,
     ctx: ExtensionContext,
   ) {
@@ -216,6 +288,7 @@ export default function slowMode(pi: ExtensionAPI) {
           body: diff,
           oldPath,
           newPath,
+          allowEdit: true,
         });
       }
     } else {
@@ -228,7 +301,25 @@ export default function slowMode(pi: ExtensionAPI) {
         body: diff,
         oldPath,
         newPath,
+        allowEdit: true,
       });
+    }
+
+    if (approved) {
+      // Read back the new file in case user edited it
+      try {
+        const { readFileSync } = await import("node:fs");
+        const editedNewText = readFileSync(newPath, "utf-8");
+        
+        // If content changed, update the input parameter and track the edit
+        if (editedNewText !== newText) {
+          input.newText = editedNewText;
+          editedCalls.set(toolCallId, { original: newText, edited: editedNewText });
+          ctx.ui.notify("Using edited content", "info");
+        }
+      } catch (err) {
+        // If we can't read the file, use original content
+      }
     }
 
     pi.events.emit("slow-mode:resolved");
@@ -242,7 +333,7 @@ export default function slowMode(pi: ExtensionAPI) {
       return { block: true, reason: "User rejected the edit in slow mode review." };
     }
 
-    // Approved: return undefined → tool proceeds normally
+    // Approved: return undefined → tool proceeds with potentially modified content
   }
 
   ////----------------------------------------
@@ -259,6 +350,7 @@ export default function slowMode(pi: ExtensionAPI) {
     body: string;                   // Content to display (file content or diff)
     oldPath?: string;               // Staged old file (edits only)
     newPath?: string;               // Staged new file (edits only)
+    allowEdit?: boolean;            // Allow editing in external editor (default: false)
   }
 
   /**
@@ -267,13 +359,16 @@ export default function slowMode(pi: ExtensionAPI) {
    * Displays the proposed change with scrollable preview and key bindings:
    * - Enter: approve change
    * - Esc: reject change
-   * - Ctrl+O: open in external viewer (delta/vim/diff)
+   * - Ctrl+O: open in external viewer/editor (delta/vim/diff for edits, $EDITOR for writes)
    * - k/↑: scroll up one line
    * - j/↓: scroll down one line
    * - u/PgUp: scroll up half page (15 lines)
    * - d/PgDn: scroll down half page (15 lines)
    * - gg: go to top
    * - G: go to bottom
+   *
+   * If allowEdit is true and user edits in external editor, the display is updated
+   * to show the modified content/diff.
    *
    * @returns Promise<boolean> - true if approved, false if rejected
    */
@@ -288,12 +383,15 @@ export default function slowMode(pi: ExtensionAPI) {
       let scrollOffset = 0;
       let cachedLines: string[] | undefined;
 
+      // Current body content (may be updated after external edit)
+      let currentBody = opts.body;
+
       // Content split into lines for scrolling
-      const bodyLines = opts.body.split("\n");
+      let bodyLines = currentBody.split("\n");
       const maxVisible = 30;  // Show up to 30 lines at once
 
       // Max scroll position (clamp to avoid scrolling past content)
-      const maxScroll = Math.max(0, bodyLines.length - 5);
+      let maxScroll = Math.max(0, bodyLines.length - 5);
 
       // Track last 'g' press for gg binding
       let lastGPress = 0;
@@ -314,9 +412,11 @@ export default function slowMode(pi: ExtensionAPI) {
       }
 
       /**
-       * Open staged files in external viewer
+       * Open staged files in external viewer/editor
        * For edits: opens delta/vim diff
        * For writes: opens file in $VISUAL/$EDITOR
+       * 
+       * If allowEdit is true, reloads content after editing.
        */
       function openExternal() {
         try {
@@ -324,6 +424,31 @@ export default function slowMode(pi: ExtensionAPI) {
             openExternalDiff(opts.oldPath, opts.newPath, opts.filePath);
           } else {
             openExternalFile(opts.stagePath);
+          }
+          
+          // If editing is allowed, reload and display the updated content
+          if (opts.allowEdit) {
+            try {
+              const { readFileSync } = require("node:fs");
+              
+              if (opts.operation === "WRITE") {
+                // Reload the edited file content
+                const editedContent = readFileSync(opts.stagePath, "utf-8");
+                currentBody = editedContent;
+              } else if (opts.operation === "EDIT" && opts.oldPath && opts.newPath) {
+                // Reload the edited new file and regenerate diff
+                const editedOldText = readFileSync(opts.oldPath, "utf-8");
+                const editedNewText = readFileSync(opts.newPath, "utf-8");
+                currentBody = generateUnifiedDiff(opts.filePath, editedOldText, editedNewText);
+              }
+              
+              // Update bodyLines and scroll bounds
+              bodyLines = currentBody.split("\n");
+              maxScroll = Math.max(0, bodyLines.length - 5);
+              scrollOffset = Math.min(scrollOffset, maxScroll);
+            } catch (err) {
+              // If reload fails, keep showing original content
+            }
           }
         } catch {
           // External viewer failed — stay in inline review
@@ -473,8 +598,9 @@ export default function slowMode(pi: ExtensionAPI) {
         lines.push("");
 
         // Key binding hints
+        const ctrlOHint = opts.allowEdit ? "Ctrl+O edit externally" : "Ctrl+O view externally";
         add(
-          theme.fg("dim", " Enter approve • Esc reject • Ctrl+O external • j/k u/d gg/G scroll"),
+          theme.fg("dim", ` Enter approve • Esc reject • ${ctrlOHint} • j/k u/d gg/G scroll`),
         );
 
         // Bottom separator
