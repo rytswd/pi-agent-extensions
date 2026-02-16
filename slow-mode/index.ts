@@ -6,8 +6,10 @@
  *
  * - Write: stages the new file in /tmp, shows content for review.
  * - Edit: stages old/new files in /tmp, shows inline diff for review.
- * - Ctrl+O opens the staged files in an external editor/diff viewer.
- * - User can edit the staged files directly; changes are reflected in the final output.
+ * - Diffs are rendered with delta (if available) for enhanced syntax highlighting.
+ * - Ctrl+E opens the new file in $VISUAL/$EDITOR for editing (edit operations).
+ * - Ctrl+O opens the diff in an external viewer (delta/vim/diff).
+ * - After editing, the diff is regenerated and shown again for approval.
  * - Toggle with /slow-mode command.
  * - Status bar shows "slow ■" when active.
  *
@@ -20,10 +22,10 @@
  * In non-interactive mode (no UI), slow mode is a no-op.
  */
 
-import { mkdirSync, mkdtempSync, writeFileSync, unlinkSync, rmSync } from "node:fs";
-import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, writeFileSync, unlinkSync, rmSync, readFileSync } from "node:fs";
+import { execFileSync, execSync } from "node:child_process";
 import { tmpdir } from "node:os";
-import { dirname, basename, join, resolve, relative } from "node:path";
+import { dirname, basename, join, resolve, relative, extname } from "node:path";
 import type {
   ExtensionAPI,
   ExtensionContext,
@@ -227,14 +229,14 @@ export default function slowMode(pi: ExtensionAPI) {
    *
    * Flow:
    * 1. Stage both old and new text as separate files
-   * 2. Try to open in external diff viewer (delta/vim/diff) by default
-   * 3. If external viewer not available, show inline TUI diff
-   * 4. User reviews changes, then approves/rejects
-   * 5. User approves → return undefined (tool proceeds)
-   * 6. User rejects → return { block: true } (tool aborted)
-   * 7. Cleanup both staged files
+   * 2. Show inline diff review UI
+   * 3. User can: approve (Enter), reject (Esc), edit new file (Ctrl+E),
+   *    or view diff externally (Ctrl+O)
+   * 4. After editing, the diff is regenerated and shown again
+   * 5. Loop continues until user approves or rejects
+   * 6. Cleanup staged files
    * 
-   * If user edits the new file in external editor, the modified content is used.
+   * If user edits the new file, the modified content is used.
    */
   async function reviewEdit(
     toolCallId: string,
@@ -250,65 +252,60 @@ export default function slowMode(pi: ExtensionAPI) {
 
     const relPath = resolvePath(ctx, filePath);
 
-    // Stage old and new files for external diff viewer
+    // Stage old and new files for diff viewing and editing
     // Timestamped to avoid conflicts if multiple edits happen
+    // Preserve original file extension so editors can detect file type
     const base = basename(relPath);
+    const ext = extname(base);
+    const nameWithoutExt = base.slice(0, -ext.length || undefined);
     const ts = Date.now();
-    const oldPath = join(tmpDir, `${base}-${ts}.old`);
-    const newPath = join(tmpDir, `${base}-${ts}.new`);
+    const oldPath = join(tmpDir, `${nameWithoutExt}-${ts}.old${ext}`);
+    const newPath = join(tmpDir, `${nameWithoutExt}-${ts}.new${ext}`);
     ensureDir(tmpDir);
     writeFileSync(oldPath, oldText, "utf-8");
     writeFileSync(newPath, newText, "utf-8");
 
-    let approved: boolean;
-
     // Emit event so other extensions can track when user approval is pending
     pi.events.emit("slow-mode:waiting");
 
-    // Try to open in external diff viewer first (preferred)
-    const diffTool = findDiffTool();
-    if (diffTool) {
-      try {
-        // Open external diff viewer — blocks until user closes it
-        openExternalDiff(oldPath, newPath, relPath);
-        
-        // After viewer closes, ask user for approval decision
-        const choice = await ctx.ui.confirm(
-          `Apply changes to ${relPath}?`,
-          ["Yes", "No"],
-        );
-        approved = choice === "Yes";
-      } catch {
-        // External viewer failed — fall back to inline diff
-        const diff = generateUnifiedDiff(relPath, oldText, newText);
-        approved = await showReview(ctx, {
-          operation: "EDIT",
-          filePath: relPath,
-          stagePath: newPath,
-          body: diff,
-          oldPath,
-          newPath,
-          allowEdit: true,
-        });
-      }
-    } else {
-      // No external diff tool available — show inline TUI diff
-      const diff = generateUnifiedDiff(relPath, oldText, newText);
-      approved = await showReview(ctx, {
-        operation: "EDIT",
+    // Review loop: show diff → user can approve, reject, or edit → repeat
+    let approved = false;
+    const { readFileSync } = await import("node:fs");
+
+    reviewLoop:
+    while (true) {
+      // Read current content (may have been edited in a previous iteration)
+      const currentOldText = readFileSync(oldPath, "utf-8");
+      const currentNewText = readFileSync(newPath, "utf-8");
+      const diff = generateUnifiedDiff(relPath, currentOldText, currentNewText);
+      
+      // Render diff through delta if available
+      const renderedDiff = renderWithDelta(diff);
+
+      const decision = await showEditReview(ctx, {
         filePath: relPath,
-        stagePath: newPath,
-        body: diff,
+        body: renderedDiff,
         oldPath,
         newPath,
-        allowEdit: true,
       });
+
+      switch (decision) {
+        case "approve":
+          approved = true;
+          break reviewLoop;
+        case "reject":
+          approved = false;
+          break reviewLoop;
+        case "edit":
+          // Open just the new file in the user's editor, then loop back
+          openExternalFile(newPath);
+          continue;
+      }
     }
 
     if (approved) {
       // Read back the new file in case user edited it
       try {
-        const { readFileSync } = await import("node:fs");
         const editedNewText = readFileSync(newPath, "utf-8");
         
         // If content changed, update the input parameter and track the edit
@@ -558,9 +555,16 @@ export default function slowMode(pi: ExtensionAPI) {
           scrollOffset,
           scrollOffset + maxVisible,
         );
+        
+        // Check if the diff contains ANSI escape codes (from delta)
+        const hasAnsiCodes = opts.operation === "EDIT" && /\x1b\[[0-9;]*m/.test(opts.body);
+        
         for (const line of visible) {
-          if (opts.operation === "EDIT") {
-            // Syntax highlighting for unified diff format
+          if (opts.operation === "EDIT" && hasAnsiCodes) {
+            // Delta has already colorized the diff, preserve ANSI codes
+            add(` ${line}`);
+          } else if (opts.operation === "EDIT") {
+            // Fallback: Manual syntax highlighting for unified diff format
             if (line.startsWith("---") || line.startsWith("+++")) {
               // File headers — dim
               add(` ${theme.fg("dim", line)}`);
@@ -622,6 +626,191 @@ export default function slowMode(pi: ExtensionAPI) {
     });
   }
 
+  /**
+   * Options for the edit review UI (diff-specific)
+   */
+  interface EditReviewOptions {
+    filePath: string;               // Relative path to the file
+    body: string;                   // Unified diff content to display
+    oldPath: string;                // Staged old file
+    newPath: string;                // Staged new file
+  }
+
+  /**
+   * Show interactive review UI for edit operations.
+   *
+   * Like showReview, but returns a three-way decision:
+   * - "approve": apply the change
+   * - "reject": block the change
+   * - "edit": open the new file in an editor (caller should loop)
+   *
+   * Key bindings:
+   * - Enter: approve
+   * - Esc: reject
+   * - Ctrl+E: edit the new file in $VISUAL/$EDITOR
+   * - Ctrl+O: view diff in external viewer (delta/vim/diff)
+   * - j/k/u/d/gg/G: scroll
+   */
+  async function showEditReview(
+    ctx: ExtensionContext,
+    opts: EditReviewOptions,
+  ): Promise<"approve" | "reject" | "edit"> {
+    const { matchesKey, Key } = await import("@mariozechner/pi-tui");
+
+    return ctx.ui.custom<"approve" | "reject" | "edit">((tui, theme, _kb, done) => {
+      // Scroll state
+      let scrollOffset = 0;
+      let cachedLines: string[] | undefined;
+
+      // Content split into lines for scrolling
+      const bodyLines = opts.body.split("\n");
+      const maxVisible = 30;
+      let maxScroll = Math.max(0, bodyLines.length - 5);
+
+      // Track last 'g' press for gg binding
+      let lastGPress = 0;
+
+      function clampScroll(offset: number) {
+        scrollOffset = Math.max(0, Math.min(maxScroll, offset));
+      }
+
+      function refresh() {
+        cachedLines = undefined;
+        tui.requestRender();
+      }
+
+      function handleInput(data: string) {
+        // Approve
+        if (matchesKey(data, Key.enter)) {
+          done("approve");
+          return;
+        }
+
+        // Reject
+        if (matchesKey(data, Key.escape)) {
+          done("reject");
+          return;
+        }
+
+        // Edit: open just the new file in the user's editor
+        if (matchesKey(data, Key.ctrl("e"))) {
+          done("edit");
+          return;
+        }
+
+        // View diff externally (read-only)
+        if (matchesKey(data, Key.ctrl("o"))) {
+          try {
+            openExternalDiff(opts.oldPath, opts.newPath, opts.filePath);
+          } catch {
+            // External viewer failed — stay in inline review
+          }
+          refresh();
+          return;
+        }
+
+        // Vim-style navigation
+        if (data === "k" || matchesKey(data, Key.up)) {
+          clampScroll(scrollOffset - 1);
+          refresh();
+          return;
+        }
+        if (data === "j" || matchesKey(data, Key.down)) {
+          clampScroll(scrollOffset + 1);
+          refresh();
+          return;
+        }
+        if (data === "u" || matchesKey(data, Key.pageUp)) {
+          clampScroll(scrollOffset - 15);
+          refresh();
+          return;
+        }
+        if (data === "d" || matchesKey(data, Key.pageDown)) {
+          clampScroll(scrollOffset + 15);
+          refresh();
+          return;
+        }
+        if (data === "g") {
+          const now = Date.now();
+          if (now - lastGPress < 500) {
+            scrollOffset = 0;
+            refresh();
+            lastGPress = 0;
+          } else {
+            lastGPress = now;
+          }
+          return;
+        }
+        if (data === "G") {
+          scrollOffset = maxScroll;
+          refresh();
+          return;
+        }
+      }
+
+      function render(width: number): string[] {
+        if (cachedLines) return cachedLines;
+
+        const lines: string[] = [];
+        const add = (s: string) => lines.push(truncateToWidth(s, width));
+
+        add(theme.fg("accent", "─".repeat(width)));
+        add(theme.fg("accent", " EDIT (diff)"));
+        add(` ${theme.fg("accent", opts.filePath)}`);
+        lines.push("");
+
+        // Scrollable diff window with syntax highlighting
+        const visible = bodyLines.slice(scrollOffset, scrollOffset + maxVisible);
+        
+        // Check if the diff contains ANSI escape codes (from delta)
+        const hasAnsiCodes = /\x1b\[[0-9;]*m/.test(opts.body);
+        
+        for (const line of visible) {
+          if (hasAnsiCodes) {
+            // Delta has already colorized the diff, preserve ANSI codes
+            add(` ${line}`);
+          } else {
+            // Fallback: Manual syntax highlighting for unified diff format
+            if (line.startsWith("---") || line.startsWith("+++")) {
+              add(` ${theme.fg("dim", line)}`);
+            } else if (line.startsWith("@@")) {
+              add(` ${theme.fg("accent", line)}`);
+            } else if (line.startsWith("+")) {
+              add(` ${theme.fg("success", line)}`);
+            } else if (line.startsWith("-")) {
+              add(` ${theme.fg("error", line)}`);
+            } else {
+              add(` ${theme.fg("text", line)}`);
+            }
+          }
+        }
+
+        if (bodyLines.length > maxVisible) {
+          const total = bodyLines.length;
+          const end = Math.min(scrollOffset + maxVisible, total);
+          add(
+            theme.fg("dim", ` (lines ${scrollOffset + 1}–${end} of ${total} — ↑↓/PgUp/PgDn to scroll)`),
+          );
+        }
+
+        lines.push("");
+        add(
+          theme.fg("dim", ` Enter approve • Esc reject • Ctrl+E edit • Ctrl+O view diff • j/k u/d gg/G scroll`),
+        );
+        add(theme.fg("accent", "─".repeat(width)));
+
+        cachedLines = lines;
+        return lines;
+      }
+
+      return {
+        render,
+        invalidate: () => { cachedLines = undefined; },
+        handleInput,
+      };
+    });
+  }
+
   ////----------------------------------------
   ///     External viewers
   //------------------------------------------
@@ -654,19 +843,45 @@ export default function slowMode(pi: ExtensionAPI) {
 
     // Configure tool-specific arguments
     if (cmd === "delta") {
-      // delta: render to pager with side-by-side layout
-      args.push("--paging", "always", "--side-by-side", oldPath, newPath);
+      // delta: use diff and pipe to delta for proper syntax highlighting
+      // Generate diff with original filename so delta can detect file type
+      try {
+        const diff = execFileSync("diff", ["-u", oldPath, newPath], {
+          encoding: "utf-8",
+          stdio: ["pipe", "pipe", "pipe"],
+        });
+        // diff returns empty if files are identical (shouldn't happen, but handle it)
+        execFileSync(cmd, ["--paging", "always", "--side-by-side"], {
+          input: diff,
+          stdio: ["pipe", "inherit", "inherit"],
+        });
+      } catch (e: any) {
+        // diff exits with 1 when files differ, which is expected
+        if (e.stdout) {
+          // Replace temp paths with original filename in diff headers for syntax detection
+          let diff = e.stdout as string;
+          diff = diff.replace(/^--- .*$/m, `--- a/${label}`);
+          diff = diff.replace(/^\+\+\+ .*$/m, `+++ b/${label}`);
+          
+          execFileSync(cmd, ["--paging", "always", "--side-by-side"], {
+            input: diff,
+            stdio: ["pipe", "inherit", "inherit"],
+          });
+        } else {
+          // Fallback to direct file comparison
+          args.push("--paging", "always", "--side-by-side", oldPath, newPath);
+          execFileSync(cmd, args, { stdio: "inherit" });
+        }
+      }
     } else if (cmd === "nvim" || cmd === "vim") {
       // vim/nvim: open in diff mode
       args.push("-d", oldPath, newPath);
+      execFileSync(cmd, args, { stdio: "inherit" });
     } else {
       // Generic diff tool: assume it takes two file arguments
       args.push(oldPath, newPath);
+      execFileSync(cmd, args, { stdio: "inherit" });
     }
-
-    // Execute synchronously — blocks until user closes the viewer
-    // stdio: "inherit" attaches to the terminal
-    execFileSync(cmd, args, { stdio: "inherit" });
   }
 
   /**
@@ -704,6 +919,68 @@ export default function slowMode(pi: ExtensionAPI) {
   }
 
   ////----------------------------------------
+  ///     Delta diff rendering
+  //------------------------------------------
+  // Cache delta availability check
+  let deltaAvailable: boolean | null = null;
+
+  /**
+   * Check if delta is available on the system.
+   * Result is cached to avoid repeated process spawns.
+   */
+  function hasDelta(): boolean {
+    if (deltaAvailable !== null) {
+      return deltaAvailable;
+    }
+    try {
+      execSync("delta --version", { stdio: "pipe" });
+      deltaAvailable = true;
+      return true;
+    } catch {
+      deltaAvailable = false;
+      return false;
+    }
+  }
+
+  /**
+   * Render a unified diff with delta syntax highlighting.
+   * 
+   * Pipes the diff through `delta --color-only` to produce ANSI-colored output.
+   * Falls back to the original diff if delta is unavailable or fails.
+   *
+   * @param unifiedDiff - Standard unified diff string
+   * @returns ANSI-colored diff if delta is available, otherwise the original diff
+   */
+  function renderWithDelta(unifiedDiff: string): string {
+    if (!hasDelta()) {
+      return unifiedDiff;
+    }
+
+    const tmp = mkdtempSync(join(tmpdir(), "pi-slowmode-delta-"));
+    const tmpFile = join(tmp, "diff.patch");
+    try {
+      writeFileSync(tmpFile, unifiedDiff, "utf-8");
+      const result = execSync(`delta --no-gitconfig --color-only < "${tmpFile}"`, {
+        encoding: "utf-8",
+        stdio: ["pipe", "pipe", "pipe"],
+        timeout: 5000,
+      });
+      return result;
+    } catch {
+      // Delta failed, return original diff
+      return unifiedDiff;
+    } finally {
+      try {
+        unlinkSync(tmpFile);
+        rmSync(tmp, { recursive: true });
+      } catch {
+        // ignore cleanup errors
+      }
+    }
+  }
+
+
+  ////----------------------------------------
   ///     Diff generation (Myers algorithm)
   //------------------------------------------
 
@@ -731,8 +1008,8 @@ export default function slowMode(pi: ExtensionAPI) {
     const hunks = buildHunks(edits, contextLines);
 
     const out: string[] = [];
-    out.push(`--- ${filePath}`);
-    out.push(`+++ ${filePath}`);
+    out.push(`--- a/${filePath}`);
+    out.push(`+++ b/${filePath}`);
 
     for (const hunk of hunks) {
       out.push(
