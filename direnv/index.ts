@@ -19,7 +19,8 @@ export default function (pi: ExtensionAPI) {
 	const bashTool = createBashTool(cwd, {
 		spawnHook: ({ command, cwd, env }) => (
 			{
-				command: `eval "$(direnv export bash)"\n${command}`,
+				// discard stderr to save tokens
+				command: `eval "$(direnv export bash 2>/dev/null)"\n${command}`,
 				cwd,
 				env,
 			}
