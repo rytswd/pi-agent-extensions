@@ -1,5 +1,5 @@
 # Nix
-result/
+result
 
 # npm dependencies
 node_modules/
