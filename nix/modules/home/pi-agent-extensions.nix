@@ -4,6 +4,7 @@
 #   programs.pi.extensions.pi-agent-extensions = {
 #     enable = true;
 #     extensions.fetch.enable = false;  # disable individual extensions
+#     extensions.pi-sub.enable = false; # disable pi-sub-core + pi-sub-bar
 #   };
 #
 # Blueprint injects { flake, inputs } as publisherArgs.
@@ -17,34 +18,38 @@ let
 
   # All available extensions and their metadata.
   # This is the single source of truth — add new extensions here.
+  # Each entry maps to one or more paths in package.json's pi.extensions array.
   extensionDefs = {
     direnv = {
       description = "Loads direnv environment variables on session start and after bash commands";
-      path = "direnv";
+      paths = [ "direnv" ];
     };
     fetch = {
       description = "HTTP request tool — fetches URLs, downloads files, shows curl equivalent";
-      path = "fetch";
+      paths = [ "fetch" ];
     };
     questionnaire = {
       description = "Multi-question tool for LLM-driven user input";
-      path = "questionnaire";
+      paths = [ "questionnaire" ];
     };
     slow-mode = {
       description = "Review gate for write/edit tool calls — toggle with /slowmode";
-      path = "slow-mode";
+      paths = [ "slow-mode" ];
+    };
+    pi-sub = {
+      description = "Status bar and subscription tracking (pi-sub-core + pi-sub-bar)";
+      paths = [
+        "node_modules/@marckrenn/pi-sub-core"
+        "node_modules/@marckrenn/pi-sub-bar"
+      ];
     };
   };
 
-  # Dependency paths always included when any extension is enabled
-  depPaths = [
-    "node_modules/@marckrenn/pi-sub-core"
-    "node_modules/@marckrenn/pi-sub-bar"
-  ];
-
-  # Extensions the user has enabled
+  # Collect paths from all enabled extensions
   enabledExtensions = lib.filterAttrs (_: ext: ext.enable) cfg.extensions;
-  enabledPaths = lib.mapAttrsToList (_: ext: extensionDefs.${ext.name}.path) enabledExtensions;
+  enabledPaths = lib.concatMap
+    (ext: extensionDefs.${ext.name}.paths)
+    (lib.attrValues enabledExtensions);
 
   # Build a derived package with a filtered package.json
   filteredPackage = pkgs.runCommand "pi-agent-extensions-filtered" { } ''
@@ -52,7 +57,7 @@ let
 
     # Generate package.json with only the enabled extensions
     ${pkgs.jq}/bin/jq --argjson exts ${
-      lib.escapeShellArg (builtins.toJSON (enabledPaths ++ depPaths))
+      lib.escapeShellArg (builtins.toJSON enabledPaths)
     } '.pi.extensions = $exts' ${cfg.package}/package.json > $out/package.json
   '';
 
@@ -87,7 +92,7 @@ in
           lib.mkOption {
             type = lib.types.submodule {
               options = {
-                enable = lib.mkEnableOption "${name} extension — ${def.description}" // {
+                enable = lib.mkEnableOption "${name} — ${def.description}" // {
                   default = true;
                 };
                 name = lib.mkOption {
