@@ -35,21 +35,28 @@ const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_BODY_BYTES = 5 * 1024 * 1024; // 5MB (download / outputPath)
 const DEFAULT_MAX_RESPONSE_TEXT = 100 * 1024; // 100KB text returned to LLM
 const MIN_READABILITY_CONTENT_LENGTH = 200; // Minimum chars for readability to be considered successful
+const CHARS_PER_TOKEN = 4; // Rough token estimate: ~4 chars per token for English text
 
 interface FetchDetails {
   url: string;
   method: string;
-  status: number;
-  statusText: string;
-  headers: Record<string, string>;
-  bodyLength: number;
-  truncated: boolean;
+  status?: number;
+  statusText?: string;
+  headers?: Record<string, string>;
+  bodyLength?: number;
+  truncated?: boolean;
   curlCommand: string;
   outputPath?: string;
   textOnly?: boolean;
   readability?: boolean;
   readabilityMethod?: "mozilla" | "simple" | "failed";
   readabilityWarning?: string;
+  /** Approximate token count of the text returned to the LLM */
+  approxTokens?: number;
+  /** Approximate token count of the full (pre-truncation) text */
+  approxTokensFull?: number;
+  /** Error message when fetch failed */
+  error?: string;
 }
 
 /** Escape a string for safe use inside single quotes in shell. */
@@ -302,10 +309,13 @@ export default function fetchExtension(pi: ExtensionAPI) {
       if (outputPath && !pi.getActiveTools().includes("write")) {
         const tmp = tmpdir();
         if (!outputPath.startsWith(tmp + "/")) {
-          throw new Error(
+          const errorMsg =
             `✗ outputPath restricted to ${tmp}/ when write tool is not enabled. ` +
-            `Use a path under ${tmp}/ or enable the write tool.`,
-          );
+            `Use a path under ${tmp}/ or enable the write tool.`;
+          return {
+            content: [{ type: "text", text: errorMsg }],
+            details: { url: params.url, method, curlCommand, error: errorMsg } as FetchDetails,
+          };
         }
       }
 
@@ -338,11 +348,25 @@ export default function fetchExtension(pi: ExtensionAPI) {
           responseHeaders[key] = value;
         });
 
-        // HTTP errors: throw so pi renders with red toolErrorBg
+        // HTTP errors: return result with error details (not throw) so
+        // renderResult can still show curl command on expand
         if (!response.ok) {
-          throw new Error(
-            `✗ ${response.status} ${response.statusText}: ${params.url}`,
-          );
+          const errorMsg = `✗ ${response.status} ${response.statusText}: ${params.url}`;
+          const errorBody = new TextDecoder("utf-8", { fatal: false }).decode(buffer);
+          const errorDetails: FetchDetails = {
+            url: params.url,
+            method,
+            status: response.status,
+            statusText: response.statusText,
+            headers: responseHeaders,
+            bodyLength: totalBytes,
+            curlCommand,
+            error: errorMsg,
+          };
+          return {
+            content: [{ type: "text", text: errorMsg + (errorBody ? "\n" + errorBody.slice(0, 2000) : "") }],
+            details: errorDetails,
+          };
         }
 
         // Save to file: write bytes to disk, return metadata only
@@ -423,10 +447,14 @@ export default function fetchExtension(pi: ExtensionAPI) {
         }
 
         const textLimit = DEFAULT_MAX_RESPONSE_TEXT;
+        const fullTextLength = bodyText.length;
         const truncated = bodyText.length > textLimit;
         if (truncated) {
           bodyText = bodyText.slice(0, textLimit);
         }
+
+        const approxTokens = Math.ceil(bodyText.length / CHARS_PER_TOKEN);
+        const approxTokensFull = Math.ceil(fullTextLength / CHARS_PER_TOKEN);
 
         const details: FetchDetails = {
           url: params.url,
@@ -441,6 +469,8 @@ export default function fetchExtension(pi: ExtensionAPI) {
           readability: readabilityUsed,
           readabilityMethod,
           readabilityWarning,
+          approxTokens,
+          approxTokensFull,
         };
 
         // Format output
@@ -467,7 +497,11 @@ export default function fetchExtension(pi: ExtensionAPI) {
 
         if (truncated) {
           lines.push(
-            `[Truncated to ${textLimit} chars for context. Use outputPath to save full response.]`,
+            `[Truncated to ${textLimit} chars (~${approxTokens} tokens) from ${fullTextLength} chars (~${approxTokensFull} tokens). Use outputPath to save full response.]`,
+          );
+        } else {
+          lines.push(
+            `[Content: ${bodyText.length} chars · ~${approxTokens} tokens]`,
           );
         }
         lines.push(bodyText);
@@ -479,19 +513,24 @@ export default function fetchExtension(pi: ExtensionAPI) {
       } catch (err: unknown) {
         clearTimeout(timer);
 
-        // Re-throw our own errors (HTTP 4xx/5xx) as-is
-        if (err instanceof Error && err.message.startsWith("✗")) {
-          throw err;
-        }
-
         const isTimeout =
           err instanceof DOMException && err.name === "AbortError";
 
-        throw new Error(
-          isTimeout
+        const errorMsg = isTimeout
             ? `✗ Timed out after ${timeout}ms: ${params.url}`
-            : `✗ ${err instanceof Error ? err.message : "Unknown fetch error"}`,
-        );
+            : `✗ ${err instanceof Error ? err.message : "Unknown fetch error"}`;
+
+        const errorDetails: FetchDetails = {
+          url: params.url,
+          method,
+          curlCommand,
+          error: errorMsg,
+        };
+
+        return {
+          content: [{ type: "text", text: errorMsg }],
+          details: errorDetails,
+        };
       }
     },
 
@@ -515,7 +554,9 @@ export default function fetchExtension(pi: ExtensionAPI) {
 
     renderResult(result, options, theme) {
       const details = result.details as FetchDetails | undefined;
-      if (!details || details.status === undefined) {
+
+      // No details at all — framework-generated error, show raw text
+      if (!details || !details.curlCommand) {
         const first = result.content[0];
         return new Text(
           first?.type === "text" ? first.text : "",
@@ -524,55 +565,92 @@ export default function fetchExtension(pi: ExtensionAPI) {
         );
       }
 
-      // Collapsed: one-line summary
-      if (!options.expanded) {
-        // Normal HTTP response
-        const statusColor =
-          details.status >= 200 && details.status < 300
-            ? "success"
-            : details.status >= 400
-              ? "error"
-              : "warning";
-        const sizeStr =
-          details.bodyLength > 1024
-            ? `${(details.bodyLength / 1024).toFixed(1)}KB`
-            : `${details.bodyLength}B`;
-        let text = theme.fg(statusColor, `${details.status} `);
-        text += theme.fg("muted", details.statusText);
-        text += theme.fg("dim", ` · ${sizeStr}`);
-        if (details.outputPath) {
-          text +=
-            theme.fg("dim", " → ") +
-            theme.fg(statusColor, details.outputPath);
-        } else if (details.truncated) {
-          text += theme.fg("warning", " (truncated)");
-        }
-        if (details.readability) {
-          if (details.readabilityMethod === "failed") {
-            text += theme.fg("error", " [readability: failed]");
-          } else {
-            text += theme.fg("accent", ` [readability: ${details.readabilityMethod}]`);
+      // Helper: format curl command
+      const formatCurl = () => {
+        const curlLines = details.curlCommand.split("\n");
+        return curlLines
+          .map((line, i) =>
+            i === 0
+              ? theme.fg("dim", "$ ") + theme.fg("muted", line)
+              : theme.fg("dim", "  ") + theme.fg("muted", line),
+          )
+          .join("\n");
+      };
+
+      // Error result (network error, timeout, or HTTP error)
+      if (details.error) {
+        let summaryText: string;
+        if (details.status != null) {
+          // HTTP error with status code
+          summaryText = theme.fg("error", `${details.status} `);
+          summaryText += theme.fg("muted", details.statusText ?? "");
+          if (details.bodyLength != null) {
+            const sizeStr =
+              details.bodyLength > 1024
+                ? `${(details.bodyLength / 1024).toFixed(1)}KB`
+                : `${details.bodyLength}B`;
+            summaryText += theme.fg("dim", ` · ${sizeStr}`);
           }
-        } else if (details.textOnly) {
-          text += theme.fg("dim", " [text]");
+        } else {
+          // Network/timeout error — no status
+          summaryText = theme.fg("error", details.error);
         }
-        if (details.readabilityWarning) {
-          text += theme.fg("warning", " ⚠️");
+
+        if (!options.expanded) {
+          return new Text(summaryText, 0, 0);
         }
-        return new Text(text, 0, 0);
+        return new Text(summaryText + "\n" + formatCurl(), 0, 0);
       }
 
-      // Expanded: curl equivalent only
-      const curlLines = details.curlCommand.split("\n");
-      const curlFormatted = curlLines
-        .map((line, i) =>
-          i === 0
-            ? theme.fg("dim", "$ ") + theme.fg("muted", line)
-            : theme.fg("dim", "  ") + theme.fg("muted", line),
-        )
-        .join("\n");
+      // Success result — build summary line
+      const statusColor =
+        details.status! >= 200 && details.status! < 300
+          ? "success"
+          : details.status! >= 400
+            ? "error"
+            : "warning";
+      const sizeStr =
+        details.bodyLength! > 1024
+          ? `${(details.bodyLength! / 1024).toFixed(1)}KB`
+          : `${details.bodyLength}B`;
+      const tokenStr = details.approxTokens
+        ? details.approxTokens > 1000
+          ? `~${(details.approxTokens / 1000).toFixed(1)}k tokens`
+          : `~${details.approxTokens} tokens`
+        : undefined;
+      let summaryText = theme.fg(statusColor, `${details.status} `);
+      summaryText += theme.fg("muted", details.statusText ?? "");
+      summaryText += theme.fg("dim", ` · ${sizeStr}`);
+      if (tokenStr) {
+        summaryText += theme.fg("dim", ` · ${tokenStr}`);
+      }
+      if (details.outputPath) {
+        summaryText +=
+          theme.fg("dim", " → ") +
+          theme.fg(statusColor, details.outputPath);
+      } else if (details.truncated) {
+        summaryText += theme.fg("warning", " (truncated)");
+      }
+      if (details.readability) {
+        if (details.readabilityMethod === "failed") {
+          summaryText += theme.fg("error", " [readability: failed]");
+        } else {
+          summaryText += theme.fg("accent", ` [readability: ${details.readabilityMethod}]`);
+        }
+      } else if (details.textOnly) {
+        summaryText += theme.fg("dim", " [text]");
+      }
+      if (details.readabilityWarning) {
+        summaryText += theme.fg("warning", " ⚠️");
+      }
 
-      return new Text(curlFormatted, 0, 0);
+      // Collapsed: one-line summary
+      if (!options.expanded) {
+        return new Text(summaryText, 0, 0);
+      }
+
+      // Expanded: summary line + curl equivalent below
+      return new Text(summaryText + "\n" + formatCurl(), 0, 0);
     },
   });
 }
