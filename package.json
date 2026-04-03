@@ -6,17 +6,16 @@
   "workspaces": [
     "fetch"
   ],
-  "keywords": ["pi-package"],
+  "keywords": [
+    "pi-package"
+  ],
   "author": "rytswd",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/rytswd/pi-agent-extensions.git"
   },
-  "dependencies": {
-    "@marckrenn/pi-sub-core": "*",
-    "@marckrenn/pi-sub-bar": "*"
-  },
+  "dependencies": {},
   "peerDependencies": {
     "@mariozechner/pi-ai": "*",
     "@mariozechner/pi-agent-core": "*",
@@ -28,10 +27,9 @@
     "extensions": [
       "direnv",
       "fetch",
-      "questionnaire", 
+      "questionnaire",
       "slow-mode",
-      "node_modules/@marckrenn/pi-sub-core",
-      "node_modules/@marckrenn/pi-sub-bar"
+      "statusline"
     ]
   }
 }
