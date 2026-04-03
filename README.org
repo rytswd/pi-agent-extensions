@@ -106,6 +106,52 @@ Extensions are auto-discovered from =~/.pi/agent/extensions/= — pi loads all =
 ** ✨ Extensions
 
 #+html:<details>
+#+html:<summary><strong>statusline</strong> - Condensed status bar with usage, VCS, and context</summary>
+#+html:<br>
+
+- *Source*: [[https://github.com/rytswd/pi-agent-extensions/tree/main/statusline][statusline/]]
+- *License*: MIT
+- *Toggle*: =/statusline=
+- *Config*: =~/.config/pi-statusline/settings.json=
+
+*Description*: A single condensed status line displayed below the editor showing model info, subscription usage, context window, VCS status, and more. Designed to be Nix-store compatible — all configuration and cache files are stored in =~/.config/pi-statusline/=, never next to the source code.
+
+*Features*:
+- *Subscription usage*: Inline usage percentages for Anthropic (5h/Week/Extra) and Codex, with reset timer shown when usage exceeds 50%
+- *VCS*: Auto-detects jj (when =.jj/= exists) or git. Shows branch/bookmark/change-id with modified/added/removed counts
+- *Context window*: Current context usage percentage with colour warnings at 70% and 90%
+- *Shared cache*: Multiple pi instances share =~/.config/pi-statusline/cache.json= — only one instance fetches from the API per refresh interval
+- *Live OAuth token*: Uses pi's model registry for auto-refreshed tokens instead of reading stale =auth.json=
+
+*Status bar format*:
+
+#+begin_example
+ Opus 4.6 ❯ 5h:4%│W:65% 1d22h ❯ 12%/1.0M ❯ think:med ❯ myproject ❯ ◆ main ~2 +3
+#+end_example
+
+Segments (left to right):
+| Segment   | Example              | Description                             |
+|-----------+----------------------+-----------------------------------------|
+| Model     | =Opus 4.6=           | Current model (stripped "Claude " prefix) |
+| Usage     | =5h:4%│W:65% 1d22h=  | Subscription usage, reset time when >50% |
+| Context   | =12%/1.0M=           | Context window usage                    |
+| Thinking  | =think:med=          | Thinking level (hidden when off)         |
+| Path      | =myproject=          | Current directory basename               |
+| VCS       | =◆ main ~2 +3=       | jj(◆)/git branch with file counts       |
+| Cost      | =$1.23=              | Session cost (hidden on subscription)    |
+
+Usage colours: dim when fine, yellow when >70% used, red when >90% used.
+
+*Commands*:
+| Command              | Action                 |
+|----------------------+------------------------|
+| =/statusline=        | Toggle on/off          |
+| =/statusline usage=  | Toggle usage display   |
+| =/statusline bar=    | Toggle entire bar      |
+
+#+html:</details>
+
+#+html:<details>
 #+html:<summary><strong>slow-mode</strong> - Review gate for <code>write</code> and <code>edit</code> tool calls</summary>
 #+html:<br>
 
@@ -350,31 +396,6 @@ direnv ✗
 
 #+html:</details>
 
-#+html:<details>
-#+html:<summary><strong>@marckrenn/pi-sub-core</strong> - Status bar core implementation</summary>
-#+html:<br>
-
-- *Source*: [[https://github.com/marckrenn/pi-sub][pi-sub upstream]]
-- *License*: MIT
-- *Author*: [[https://github.com/marckrenn][marckrenn]]
-- *Type*: Dependency (used by pi-sub-bar)
-
-*Description*: Core implementation for the status bar system, providing the foundational utilities and APIs for status bar management.
-
-#+html:</details>
-
-#+html:<details>
-#+html:<summary><strong>@marckrenn/pi-sub-bar</strong> - Status bar management</summary>
-#+html:<br>
-
-- *Source*: [[https://github.com/marckrenn/pi-sub][pi-sub upstream]]
-- *License*: MIT
-- *Author*: [[https://github.com/marckrenn][marckrenn]]
-- *Dependencies*: =@marckrenn/pi-sub-core=
-
-*Description*: Status bar extension that provides a persistent bottom bar for displaying extension status, notifications, and other real-time information in the pi terminal interface.
-
-#+html:</details>
 
 ** ⚙️ Configuration
 
@@ -401,8 +422,7 @@ Resource Configuration                     space toggle · esc close
   ~/Coding/github.com/rytswd/pi-agent-extensions (user)
     Extensions
 >     [x] direnv/index.ts
-      [x] pi-sub-bar/index.ts
-      [x] pi-sub-core/index.ts
+      [x] statusline/index.ts
       [x] fetch/index.ts
       [x] questionnaire/index.ts
       [x] slow-mode/index.ts
@@ -440,12 +460,21 @@ pi
 - *fetch:* The LLM will use it for HTTP requests — try asking it to fetch a URL
 - *questionnaire:* The LLM will call it automatically when needed
 - *direnv:* Watch the status bar — it loads automatically if you have =.envrc= files
-- *subscription tools:* Use =sub_get_usage= and =sub_get_all_usage= tools, see status in the bar
+- *statusline:* Appears automatically below the editor — type =/statusline= to toggle
 
 ** 📁 Structure
 
 #+begin_example
-~/.pi/agent/extensions/
+pi-agent-extensions/
+├── statusline/         # Status bar with usage, VCS, context
+│   ├── index.ts
+│   └── src/
+│       ├── bar.ts      # Bar segment renderer
+│       ├── cache.ts    # Shared file-based cache
+│       ├── providers.ts # Anthropic + Codex usage fetching
+│       ├── settings.ts # XDG config management
+│       ├── types.ts    # Type definitions
+│       └── vcs.ts      # git + jj detection
 ├── direnv/             # Direnv integration
 │   └── index.ts
 ├── fetch/              # HTTP request tool
@@ -454,12 +483,9 @@ pi
 │   └── index.ts
 ├── slow-mode/          # Review gate for write/edit
 │   ├── index.ts
-│   ├── package.json    # Dependencies (diff package)
-│   ├── package-lock.json
-│   ├── bun.lock
-│   └── node_modules/   # npm packages (gitignored)
+│   └── package.json
 ├── package.json        # Package metadata and extension list
-├── .gitignore          # Ignores node_modules, logs
+├── .gitignore
 ├── AGENTS.md           # Agent context for AI assistants
 ├── air/                # Air documentation (development planning)
 │   ├── context/        # Project context files
@@ -498,6 +524,8 @@ See the [[https://github.com/mariozechner/pi][pi documentation]] for the full ex
 
 - [[https://github.com/mariozechner][Mario Zechner]]: pi coding agent
 - [[https://github.com/Mic92][Mic92]]: Original direnv implementation ([[https://github.com/Mic92/dotfiles/blob/main/home/.pi/agent/extensions/direnv.ts][source]])
+- [[https://github.com/marckrenn][marckrenn]]: [[https://github.com/marckrenn/pi-sub][pi-sub]] — inspiration for subscription usage tracking
+- [[https://github.com/nicobailon][nicobailon]]: [[https://github.com/nicobailon/pi-powerline-footer][pi-powerline-footer]] — inspiration for powerline-style status bar
 
 ** 📄 License
 
