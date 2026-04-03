@@ -10,6 +10,14 @@ import { basename } from "node:path";
 import { getVcsStatus, invalidateVcs } from "./vcs.js";
 import type { UsageSnapshot } from "./types.js";
 
+// ── Extension statuses ───────────────────────────────────────────────────
+
+let extensionStatuses: ReadonlyMap<string, string> = new Map();
+
+export function setExtensionStatuses(statuses: ReadonlyMap<string, string>): void {
+	extensionStatuses = statuses;
+}
+
 // ── Separator ────────────────────────────────────────────────────────────
 
 const SEP = "❯";
@@ -37,6 +45,16 @@ function usageColor(pct: number): ThemeColor {
 }
 
 // ── Segment renderers ────────────────────────────────────────────────────
+
+function segStatuses(theme: Theme): string | null {
+	if (!extensionStatuses || extensionStatuses.size === 0) return null;
+	const parts: string[] = [];
+	for (const value of extensionStatuses.values()) {
+		if (value) parts.push(value);
+	}
+	if (parts.length === 0) return null;
+	return parts.join(theme.fg("dim", " "));
+}
 
 export interface BarContext {
 	model: { id: string; name?: string; provider?: string; reasoning?: boolean; contextWindow?: number } | undefined;
@@ -146,6 +164,7 @@ export function renderBar(theme: Theme, ctx: BarContext, width: number): string 
 		segPath(theme, ctx),
 		segVcs(theme, ctx),
 		segCost(theme, ctx),
+		segStatuses(theme),
 	].filter((s): s is string => s !== null);
 
 	if (segments.length === 0) return "";

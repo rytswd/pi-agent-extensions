@@ -10,7 +10,7 @@
 
 import type { ExtensionAPI, ExtensionContext, Theme, ReadonlyFooterDataProvider } from "@mariozechner/pi-coding-agent";
 import { loadSettings, saveSettings, clearCache } from "./src/settings.js";
-import { renderBar, buildBarContext, invalidateVcs } from "./src/bar.js";
+import { renderBar, buildBarContext, invalidateVcs, setExtensionStatuses } from "./src/bar.js";
 import { detectProvider, createUsageController, setApiKeyResolver, resetRateLimit } from "./src/providers.js";
 
 // ── Extension ────────────────────────────────────────────────────────────
@@ -72,6 +72,9 @@ export default function statusline(pi: ExtensionAPI) {
 				dispose: unsub,
 				invalidate() {},
 				render(): string[] {
+					// Feed extension statuses into the bar widget
+					const statuses = footerData.getExtensionStatuses();
+					setExtensionStatuses(statuses);
 					return [];
 				},
 			};
