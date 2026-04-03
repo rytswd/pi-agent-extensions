@@ -1,0 +1,95 @@
+#+title: Statusline
+#+state: complete
+#+FILETAGS: :extension:feature:
+
+* Summary
+
+A pi extension that renders a single condensed status line below the editor, showing model info, subscription usage, context window, thinking level, project path, and VCS status. Designed to be Nix-store compatible — all mutable state (config, cache) lives in =~/.config/pi-statusline/=.
+
+* Motivation
+
+Existing solutions (pi-sub-bar, pi-powerline-footer) store config next to their source files, making them incompatible with read-only filesystems like the Nix store. They also pull in large dependency trees and have extensive UI customisation that adds complexity without proportional value.
+
+** Goals
+- Single condensed line below the editor with essential information at a glance.
+- Subscription usage inline next to the model name — compact percentages, not full bars.
+- VCS support for both git and jj (auto-detected).
+- Shared file-based cache so multiple pi instances don't all hit the usage API.
+- Config and cache in =~/.config/pi-statusline/= (XDG-compliant, Nix-store safe).
+- Live OAuth token via pi's model registry (not stale =auth.json=).
+- Zero npm dependencies — only peer dependencies on pi's built-in packages.
+
+** Non-Goals
+- Theme system, share strings, or extensive display customisation.
+- Settings UI with nested menus.
+- Supporting every provider — only Anthropic and Codex for now.
+- Overriding the editor component (status bar is a widget, not an editor wrapper).
+
+* Proposal
+
+** Architecture
+
+#+begin_example
+statusline/
+├── index.ts            Entry point, events, widget, commands
+└── src/
+    ├── bar.ts          Segment renderer (model, usage, context, vcs, etc.)
+    ├── cache.ts        Shared file-based cache with lock coordination
+    ├── providers.ts    Anthropic + Codex usage fetching
+    ├── settings.ts     XDG config in ~/.config/pi-statusline/
+    ├── types.ts        Type definitions
+    └── vcs.ts          git + jj detection with async caching
+#+end_example
+
+** Status Bar Format
+
+#+begin_example
+ Opus 4.6 ❯ 5h:4%│W:65% 1d22h ❯ 12%/1.0M ❯ think:med ❯ myproject ❯ ◆ main ~2 +3
+#+end_example
+
+Segments (left to right):
+- *Model*: Current model with "Claude " prefix stripped.
+- *Usage*: Subscription windows (5h/Week/Extra for Anthropic, primary/secondary for Codex). Reset timer shown when usage >50%. Colour-coded: dim (<70%), yellow (70-90%), red (>90%).
+- *Context*: Context window usage percentage. Colour warnings at 70% and 90%.
+- *Thinking*: Thinking level abbreviation (hidden when "off").
+- *Path*: Current directory basename.
+- *VCS*: Auto-detects jj (◆ icon, bookmark/change-id) or git (branch). Shows ~modified +added -removed counts.
+- *Cost*: Session cost in dollars (hidden on subscription).
+
+** Usage Data Fetching
+
+- Reads OAuth token from =ctx.modelRegistry.getApiKeyForProvider()= (live, auto-refreshed) with fallback to =auth.json=.
+- Shared file cache at =~/.config/pi-statusline/cache.json= with 60s TTL.
+- File lock (=cache.lock=) with 10s stale detection prevents concurrent fetches.
+- On HTTP 429: backs off for 5 minutes (no retries).
+- Refreshes on: session start, turn end, model change, and periodic 60s timer.
+
+** VCS Detection
+
+- Checks =.jj/= before =.git/= because jj repos always colocate =.git/=.
+- jj: uses =jj log= for change-id/bookmarks, =jj diff --summary= for file counts.
+- git: uses =git branch --show-current= and =git status --porcelain=.
+- Async with 1s cache TTL — non-blocking for render calls.
+- Invalidated on: write/edit tool results, bash/user commands matching VCS patterns.
+
+** Commands
+
+| Command              | Action               |
+|----------------------+----------------------|
+| =/statusline=        | Toggle on/off        |
+| =/statusline usage=  | Toggle usage display |
+| =/statusline bar=    | Toggle entire bar    |
+
+* Implementation Notes
+
+** Token Refresh Issue
+
+Pi auto-refreshes OAuth tokens in memory via its model registry but doesn't always write the refreshed token back to =auth.json=. Reading the file directly leads to stale tokens and persistent 429 errors. The fix is using =ctx.modelRegistry.getApiKeyForProvider()= which returns the live token.
+
+** Rate Limit Handling
+
+The Anthropic usage API (=/api/oauth/usage=) has an aggressive rate limit with a long recovery window. Multiple pi instances (e.g. via chronoa/workmux) each running sub-core can exhaust it. The shared file cache prevents this — only one instance fetches per interval, others read the cache.
+
+** Nix Store Compatibility
+
+The extension has zero npm =dependencies= — only =peerDependencies= on pi's built-in packages. All mutable state uses XDG paths. The entire =statusline/= directory can live in a read-only Nix store path.

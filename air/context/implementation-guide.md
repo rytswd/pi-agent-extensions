@@ -6,6 +6,7 @@
 - **Runtime**: Node.js (provided by pi)
 - **Extension API**: `@mariozechner/pi-coding-agent`
 - **Schema Library**: `@sinclair/typebox` (for tool parameter definitions)
+- **Dependencies**: Zero npm dependencies — only peerDependencies on pi's built-in packages
 
 No build step, no bundler, no tsconfig required. Just write `.ts` files.
 
@@ -15,11 +16,13 @@ Extensions live in `~/.pi/agent/extensions/` for global auto-discovery.
 
 ```
 ~/.pi/agent/extensions/
-├── extension-name.ts           # Single-file extension
-└── complex-extension/          # Multi-file extension
-    ├── index.ts                # Entry point
-    ├── helpers.ts
-    └── package.json            # If npm deps are needed
+├── statusline/                 # Multi-file extension
+│   ├── index.ts                # Entry point
+│   └── src/                    # Source files
+├── direnv.ts                   # Single-file extension
+├── fetch.ts                    # Single-file extension
+├── questionnaire.ts            # Single-file extension
+└── slow-mode.ts                # Single-file extension
 ```
 
 ## Coding Standards

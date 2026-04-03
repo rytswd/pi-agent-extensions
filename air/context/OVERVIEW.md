@@ -22,7 +22,9 @@
 
 ```
 ~/.pi/agent/extensions/
+├── statusline/         # Condensed status bar extension
 ├── direnv.ts           # Direnv integration extension
+├── fetch.ts            # HTTP request tool extension
 ├── questionnaire.ts    # Multi-question tool for LLM-driven user input
 ├── slow-mode.ts        # Review gate for write/edit tool calls
 ├── AGENTS.md           # Agent context for AI assistants
@@ -32,10 +34,19 @@
     ├── context/        # Project context files (this directory)
     ├── support-direnv.org
     ├── slow-mode.org
+    ├── statusline.org
     └── SKILL.md
 ```
 
 ## Extensions
+
+### statusline/
+Provides a condensed status bar below the editor showing model info, subscription usage, context window, VCS status, and cost. Designed with zero npm dependencies and Nix-store compatibility by storing all configuration and cache in `~/.config/pi-statusline/`.
+
+- **Architecture**: Multi-file extension with shared file-based cache and XDG config
+- **Events**: `session_start`, `turn_end`, `tool_result` (write, edit, bash), `model_change`
+- **Commands**: `/statusline`, `/statusline usage`, `/statusline bar`
+- **Air doc**: `air/statusline.org`
 
 ### direnv.ts
 Loads [direnv](https://direnv.net/) environment variables into pi sessions. Runs on session start and after every bash command to pick up `.envrc` changes. Displays status in the pi status bar.
@@ -50,6 +61,13 @@ Registers a `questionnaire` tool that the LLM can call to ask the user single or
 - **Mechanism**: `pi.registerTool()` — LLM decides when to call it
 - **UI**: `ctx.ui.custom()` interactive component with keyboard navigation
 
+### fetch.ts
+Provides an HTTP request tool that the LLM can use to fetch URLs, download files, and make API calls. Displays curl equivalent commands and handles various content types including readability extraction for web pages.
+
+- **Mechanism**: `pi.registerTool()` with support for GET/POST/PUT/PATCH/DELETE methods
+- **Features**: File downloads, text-only extraction, readability mode, timeout handling
+- **UI**: Shows curl equivalent and handles binary downloads
+
 ### slow-mode.ts
 Intercepts `write` and `edit` tool calls to let the user review proposed changes before they are applied. New files are staged in a tmp directory; edits stage old/new files and display a unified diff. Toggle with `/slow-mode`. Use Ctrl+O to open in an external diff viewer.
 
@@ -61,6 +79,6 @@ Intercepts `write` and `edit` tool calls to let the user review proposed changes
 
 ## Current Focus
 
-The direnv and questionnaire extensions are complete. Slow mode is being implemented — see `air/slow-mode.org` for the specification.
+The core extensions (statusline, direnv, fetch, questionnaire, slow-mode) are complete and ready for use. The project now has zero npm dependencies, using only peerDependencies on pi's built-in packages for maximum compatibility.
 
 Use `airctl status` to see planning documents and their states.

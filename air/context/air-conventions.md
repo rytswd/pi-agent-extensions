@@ -37,6 +37,7 @@ Detailed specification.
 
 ### Extension Tags
 - `:direnv:` — Direnv integration
+- `:statusline:` — Status bar extension
 - `:extension:` — General extension work
 - `:infra:` — Project infrastructure (CI, tooling, docs)
 
@@ -56,6 +57,8 @@ Detailed specification.
 ```
 ./air/
 ├── support-direnv.org    # Feature documents at root level
+├── slow-mode.org         # Slow mode extension
+├── statusline.org        # Status bar extension
 ├── context/              # Generated context files
 ├── templates/            # Document templates
 └── archive/              # Completed documents

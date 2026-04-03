@@ -52,6 +52,26 @@ export default function (pi: ExtensionAPI) {
 
 ## Current Extensions
 
+### statusline/
+
+```
+session_start ──► initialise cache + config
+              ├─► fetch usage data (async)
+              └─► render status bar
+
+turn_end ──► refresh usage data ──► update bar
+
+tool_result ──► invalidate VCS cache ──► refresh VCS status
+
+model_change ──► clear usage cache ──► fetch new model data
+```
+
+Key design decisions:
+- **Zero dependencies**: Only peerDependencies on pi's built-in packages
+- **XDG compliance**: All config and cache in `~/.config/pi-statusline/`
+- **Shared cache**: File-based cache with locking to prevent API rate limits
+- **Live tokens**: Uses `ctx.modelRegistry.getApiKeyForProvider()` for fresh OAuth tokens
+
 ### direnv.ts
 
 ```
@@ -66,6 +86,22 @@ Key design decisions:
 - **Serialisation**: Uses a `pending` promise to ensure only one direnv process at a time
 - **Timeout**: 10s inline wait; if direnv takes longer, it finishes in the background
 - **Idempotent**: Empty output (no changes) is treated as success
+
+### fetch.ts
+
+```
+LLM calls fetch tool ──► validate params ──► make HTTP request
+                                           ├─► handle redirects/timeouts
+                                           ├─► process response (readability, text-only)
+                                           ├─► save to file (if outputPath)
+                                           └─► return content + curl equivalent
+```
+
+Key design decisions:
+- **Content handling**: Auto-detects and processes various content types
+- **Readability**: Mozilla Readability for article extraction
+- **File downloads**: Supports binary downloads with automatic parent directory creation
+- **Curl equivalent**: Shows equivalent curl command for user reference
 
 ### slow-mode.ts
 
@@ -95,4 +131,4 @@ Key design decisions:
 3. Register event handlers and/or tools
 4. pi auto-discovers it on next session (or use `/reload`)
 
-For extensions with npm dependencies, create a subdirectory with `package.json` and `index.ts`.
+For multi-file extensions, create a subdirectory with `index.ts` as the entry point. The project follows a zero npm dependency approach, using only peerDependencies on pi's built-in packages for maximum compatibility.
