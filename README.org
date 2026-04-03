@@ -364,35 +364,14 @@ Errors show with red background:
 - *Source*: [[https://github.com/rytswd/pi-agent-extensions/tree/main/direnv][direnv/]]
 - *License*: MIT
 - *Homepage*: [[https://direnv.net/][direnv.net]]
-- *Status bar*: =direnv …= (loading), =direnv ✓= (loaded), =direnv ✗= (error)
 - *Requirements*: =direnv= installed and =.envrc= files must be allowed (=direnv allow=)
 - *Credit*: Based on the original implementation by [[https://github.com/Mic92][Mic92]] from [[https://github.com/Mic92/dotfiles/blob/main/home/.pi/agent/extensions/direnv.ts][Mic92/dotfiles]]
 
-*Description*: Automatically loads [[https://direnv.net/][direnv]] environment variables into pi sessions, running after every bash command to pick up =.envrc= changes.
+*Description*: Automatically loads [[https://direnv.net/][direnv]] environment variables into pi sessions by prepending =direnv export bash= to every bash command. This ensures environment variables from =.envrc= files are always up to date.
 
 *Features*:
-- Loads environment on session start and after every bash command
-- Serialized execution with 10s timeout
-- Picks up changes from =cd=, =git checkout=, =direnv allow=, etc.
-
-*What it looks like*:
-
-Status bar indicator:
-
-#+begin_example
-# While loading:
-direnv …
-
-# Successfully loaded:
-direnv ✓
-
-# Error (e.g., .envrc not allowed):
-direnv ✗
-#+end_example
-
-*When it runs*:
-- On session start
-- After every bash command
+- Prepends =direnv export bash= to every bash tool call
+- Picks up changes from =cd=, =git checkout=, =direnv allow=, etc. automatically
 
 #+html:</details>
 
