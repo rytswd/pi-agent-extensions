@@ -77,7 +77,7 @@ export default function notify(pi: ExtensionAPI) {
 	function updateStatus(ctx: ExtensionContext): void {
 		if (!ctx.hasUI) return;
 		// Only show when off — on is the expected default
-		ctx.ui.setStatus("notify", enabled ? undefined : ctx.ui.theme.fg("warning", "notify:off"));
+		ctx.ui.setStatus("notify", enabled ? undefined : ctx.ui.theme.fg("warning", "\uf1f6 notify:off"));
 	}
 
 	pi.on("session_start", async (_event, ctx) => {
