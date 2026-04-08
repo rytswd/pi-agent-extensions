@@ -1,0 +1,156 @@
+#+title: Config Directory Convention
+#+state: work-in-progress
+#+FILETAGS: :infra:convention:
+
+* Summary
+
+A shared convention for where extensions in this repo (and its companion =pi-agent-extensions-extra=) store persistent configuration, cache, and state files. Ensures consistency across extensions, supports Nix-store deployments, and provides a single override point.
+
+* Motivation
+
+Extensions currently store config in scattered locations:
+- =~/.config/pi-statusline/= (statusline)
+- =~/.config/pi-telegram-connect/= (telegram-connect, extra repo)
+- =~/.config/pi-bridge/= (bridge, extra repo)
+
+This creates clutter under =~/.config/= and makes it hard to manage, back up, or relocate all extension state. Each extension independently resolves its config path.
+
+** Goals
+- One base directory per repo — all extensions under a single namespace.
+- Single override point — change one setting to relocate everything.
+- XDG-compliant defaults — no config file needed for the common case.
+- Nix-store safe — source code is read-only, all mutable state goes here.
+- Shared utility — extensions import a common =configDir()= function, not each rolling their own.
+
+** Non-Goals
+- Changing where pi itself stores config (=~/.pi/agent/=).
+- Managing project-local config (=<cwd>/.pi/=) — that stays per-project.
+
+* Proposal
+
+** Directory Layout
+
+#+begin_example
+~/.config/pi-agent-extensions/        # this repo
+├── statusline/
+│   ├── settings.json
+│   ├── cache.json
+│   └── cache.lock
+├── permission-gate/
+│   └── rules.json
+└── ...
+
+~/.config/pi-agent-extensions-extra/  # extra repo
+├── telegram-connect/
+│   └── config.json
+├── bridge/
+│   └── config.json
+└── ...
+#+end_example
+
+** Resolution Order
+
+1. Read =~/.pi/agent/pi-agent-extensions.json= (or =pi-agent-extensions-extra.json=) for explicit =configDir= override.
+2. Use =$XDG_CONFIG_HOME/pi-agent-extensions/= if =XDG_CONFIG_HOME= is set.
+3. Fall back to =~/.config/pi-agent-extensions/=.
+
+Override file (=~/.pi/agent/pi-agent-extensions.json=) — optional, no file needed for default:
+#+begin_src json
+{
+  "configDir": "/custom/path/to/config"
+}
+#+end_src
+
+** Shared Utility
+
+A common module that all extensions import:
+
+#+begin_src typescript
+// src/config-dir.ts
+import { readFileSync, existsSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+
+const REPO_NAME = "pi-agent-extensions"; // or "pi-agent-extensions-extra"
+
+export function configDir(extensionName: string): string {
+    // 1. Check override file
+    const overridePath = join(homedir(), ".pi", "agent", `${REPO_NAME}.json`);
+    if (existsSync(overridePath)) {
+        try {
+            const cfg = JSON.parse(readFileSync(overridePath, "utf-8"));
+            if (cfg.configDir) return join(cfg.configDir, extensionName);
+        } catch {}
+    }
+
+    // 2. XDG_CONFIG_HOME
+    const xdg = process.env.XDG_CONFIG_HOME;
+    if (xdg) return join(xdg, REPO_NAME, extensionName);
+
+    // 3. Default
+    return join(homedir(), ".config", REPO_NAME, extensionName);
+}
+#+end_src
+
+Usage in extensions:
+#+begin_src typescript
+import { configDir } from "../src/config-dir.js";
+
+const dir = configDir("statusline");
+// → ~/.config/pi-agent-extensions/statusline/
+#+end_src
+
+** Migration
+
+Existing extensions read from the new path first, fall back to the old path, write to the new path only:
+
+#+begin_src typescript
+function loadSettings(): Settings {
+    // Try new location
+    const newPath = join(configDir("statusline"), "settings.json");
+    if (existsSync(newPath)) return JSON.parse(readFileSync(newPath, "utf-8"));
+
+    // Fall back to old location
+    const oldPath = join(homedir(), ".config", "pi-statusline", "settings.json");
+    if (existsSync(oldPath)) return JSON.parse(readFileSync(oldPath, "utf-8"));
+
+    return DEFAULT_SETTINGS;
+}
+
+function saveSettings(s: Settings): void {
+    // Always write to new location
+    const dir = configDir("statusline");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "settings.json"), JSON.stringify(s, null, 2));
+}
+#+end_src
+
+Old directories (=~/.config/pi-statusline/= etc.) can be cleaned up manually after confirming migration.
+
+** Affected Extensions
+
+This repo (=pi-agent-extensions=):
+| Extension | Old path | New path |
+|-----------+-----------------------------------+------------------------------------------------|
+| statusline | =~/.config/pi-statusline/= | =~/.config/pi-agent-extensions/statusline/= |
+| permission-gate | _(new)_ | =~/.config/pi-agent-extensions/permission-gate/= |
+
+Extra repo (=pi-agent-extensions-extra=):
+| Extension | Old path | New path |
+|-----------+--------------------------------------+------------------------------------------------------|
+| telegram-connect | =~/.config/pi-telegram-connect/= | =~/.config/pi-agent-extensions-extra/telegram-connect/= |
+| bridge | =~/.config/pi-bridge/= | =~/.config/pi-agent-extensions-extra/bridge/= |
+
+** Project-Local Config
+
+Project-local overrides remain at =<cwd>/.pi/<extension-name>.json= — not affected by this convention. Examples:
+- =<cwd>/.pi/telegram-connect.json= (topic ID)
+- =<cwd>/.pi/permission-gate.json= (project-specific rules)
+
+* Implementation Plan
+
+1. Create =src/config-dir.ts= shared utility in each repo.
+2. Update statusline to use =configDir("statusline")= with old-path fallback.
+3. Implement permission-gate using =configDir("permission-gate")= from the start.
+4. Update telegram-connect and bridge in extra repo.
+5. Document in README.
