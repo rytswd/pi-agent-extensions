@@ -70,7 +70,8 @@ interface CacheEntry {
 }
 
 interface CacheFile {
-	[provider: string]: CacheEntry;
+	_rateLimitedUntil?: number;
+	[provider: string]: CacheEntry | number | undefined;
 }
 
 function readCacheFile(): CacheFile {
@@ -104,10 +105,25 @@ function writeCacheFile(cache: CacheFile): void {
  */
 export function getCached(provider: ProviderName, ttlMs: number): UsageSnapshot | undefined {
 	const cache = readCacheFile();
-	const entry = cache[provider];
-	if (!entry) return undefined;
+	const entry = cache[provider] as CacheEntry | undefined;
+	if (!entry || typeof entry !== "object") return undefined;
 	if (Date.now() - entry.fetchedAt >= ttlMs) return undefined;
 	return entry.usage;
+}
+
+/** Check if we're in a shared rate-limit backoff window. */
+export function isRateLimited(): boolean {
+	const cache = readCacheFile();
+	const until = cache._rateLimitedUntil;
+	if (typeof until !== "number") return false;
+	return Date.now() < until;
+}
+
+/** Set shared rate-limit backoff (written to cache file so all instances respect it). */
+export function setRateLimited(durationMs: number): void {
+	const cache = readCacheFile();
+	cache._rateLimitedUntil = Date.now() + durationMs;
+	writeCacheFile(cache);
 }
 
 /**

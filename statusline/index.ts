@@ -12,6 +12,7 @@ import type { ExtensionAPI, ExtensionContext, Theme, ReadonlyFooterDataProvider 
 import { loadSettings, saveSettings, clearCache } from "./src/settings.js";
 import { renderBar, buildBarContext, invalidateVcs, setExtensionStatuses } from "./src/bar.js";
 import { detectProvider, createUsageController, setApiKeyResolver, resetRateLimit } from "./src/providers.js";
+import { getCached } from "./src/cache.js";
 
 // ── Extension ────────────────────────────────────────────────────────────
 
@@ -28,6 +29,15 @@ export default function statusline(pi: ExtensionAPI) {
 	const usage = createUsageController(() => {
 		renderWidget();
 	});
+
+	/** Get usage: in-memory first, then file cache fallback. */
+	function getUsage() {
+		const mem = usage.current();
+		if (mem) return mem;
+		const provider = currentProvider();
+		if (!provider) return undefined;
+		return getCached(provider, 5 * 60 * 1000);
+	}
 
 	function currentProvider() {
 		return detectProvider(currentCtx?.model);
@@ -48,7 +58,7 @@ export default function statusline(pi: ExtensionAPI) {
 				render(width: number) {
 					if (!currentCtx) return [];
 					const thinkingLevel = getThinkingLevelFn?.() ?? "off";
-					const subUsage = settings.showUsage ? usage.current() : undefined;
+					const subUsage = settings.showUsage ? getUsage() : undefined;
 					const barCtx = buildBarContext(currentCtx, thinkingLevel, subUsage);
 					const line = renderBar(theme, barCtx, width);
 					if (!line) return [];
@@ -117,12 +127,19 @@ export default function statusline(pi: ExtensionAPI) {
 		getThinkingLevelFn =
 			typeof (ctx as any).getThinkingLevel === "function" ? () => (ctx as any).getThinkingLevel() : null;
 
+		// PI_STATUSLINE=minimal disables usage fetching
+		if (process.env.PI_STATUSLINE === "minimal") {
+			settings.showUsage = false;
+		}
+
 		if (enabled && ctx.hasUI) {
 			setupFooter(ctx);
 			renderWidget();
 		}
 
-		await initUsage(ctx);
+		if (settings.showUsage) {
+			await initUsage(ctx);
+		}
 	});
 
 	pi.on("turn_end", async () => {

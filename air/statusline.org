@@ -4,7 +4,7 @@
 
 * Summary
 
-A pi extension that renders a single condensed status line below the editor, showing model info, subscription usage, context window, thinking level, project path, and VCS status. Designed to be Nix-store compatible — all mutable state (config, cache) lives in =~/.config/pi-statusline/=.
+A pi extension that renders a single condensed status line below the editor, showing model info, subscription usage, context window, thinking level, project path, VCS status, and extension statuses (e.g. slow-mode, stash, telegram indicators). Designed to be Nix-store compatible — all mutable state (config, cache) lives in =~/.config/pi-statusline/=.
 
 * Motivation
 
@@ -18,6 +18,8 @@ Existing solutions (pi-sub-bar, pi-powerline-footer) store config next to their 
 - Config and cache in =~/.config/pi-statusline/= (XDG-compliant, Nix-store safe).
 - Live OAuth token via pi's model registry (not stale =auth.json=).
 - Zero npm dependencies — only peer dependencies on pi's built-in packages.
+- Extension statuses (from =ctx.ui.setStatus=) rendered inline in the bar.
+- =PI_STATUSLINE=minimal= env var to disable usage fetching for subagent sessions.
 
 ** Non-Goals
 - Theme system, share strings, or extensive display customisation.
@@ -33,7 +35,7 @@ Existing solutions (pi-sub-bar, pi-powerline-footer) store config next to their 
 statusline/
 ├── index.ts            Entry point, events, widget, commands
 └── src/
-    ├── bar.ts          Segment renderer (model, usage, context, vcs, etc.)
+    ├── bar.ts          Segment renderer (model, usage, context, vcs, statuses, etc.)
     ├── cache.ts        Shared file-based cache with lock coordination
     ├── providers.ts    Anthropic + Codex usage fetching
     ├── settings.ts     XDG config in ~/.config/pi-statusline/
@@ -44,7 +46,7 @@ statusline/
 ** Status Bar Format
 
 #+begin_example
- Opus 4.6 ❯ 5h:4%│W:65% 1d22h ❯ 12%/1.0M ❯ think:med ❯ myproject ❯ ◆ main ~2 +3
+ Opus 4.6 ❯ 5h:4%│W:65% 1d22h ❯ 12%/1.0M ❯ think:med ❯ myproject ❯ ◆ main ~2 +3 ❯ slow ■ ❯  proj
 #+end_example
 
 Segments (left to right):
@@ -55,11 +57,20 @@ Segments (left to right):
 - *Path*: Current directory basename.
 - *VCS*: Auto-detects jj (◆ icon, bookmark/change-id) or git (branch). Shows ~modified +added -removed counts.
 - *Cost*: Session cost in dollars (hidden on subscription).
+- *Extension statuses*: Any statuses set by other extensions (slow-mode, stash, telegram-connect, etc.).
+
+** Footer Integration
+
+The extension overrides the footer via =ctx.ui.setFooter()= to:
+1. Access =footerData.getExtensionStatuses()= for other extensions' status indicators.
+2. Feed those statuses into the bar widget as the final segment.
+3. Access =footerData.onBranchChange()= for VCS re-renders.
+The footer itself renders empty — all content is in the =belowEditor= widget.
 
 ** Usage Data Fetching
 
 - Reads OAuth token from =ctx.modelRegistry.getApiKeyForProvider()= (live, auto-refreshed) with fallback to =auth.json=.
-- Shared file cache at =~/.config/pi-statusline/cache.json= with 60s TTL.
+- Falls back to shared file cache (=~/.config/pi-statusline/cache.json=, up to 5 min stale) when in-memory cache is empty (e.g. after =/reload=).
 - File lock (=cache.lock=) with 10s stale detection prevents concurrent fetches.
 - On HTTP 429: backs off for 5 minutes (no retries).
 - Refreshes on: session start, turn end, model change, and periodic 60s timer.
@@ -89,6 +100,10 @@ Pi auto-refreshes OAuth tokens in memory via its model registry but doesn't alwa
 ** Rate Limit Handling
 
 The Anthropic usage API (=/api/oauth/usage=) has an aggressive rate limit with a long recovery window. Multiple pi instances (e.g. via chronoa/workmux) each running sub-core can exhaust it. The shared file cache prevents this — only one instance fetches per interval, others read the cache.
+
+** session_start Reliability
+
+=session_start= does not fire reliably on =/reload= for package-loaded extensions. The widget render callback reads from the shared file cache as a fallback when the in-memory cache is empty, ensuring usage data is displayed even when =initUsage()= hasn't run.
 
 ** Nix Store Compatibility
 

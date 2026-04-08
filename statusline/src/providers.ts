@@ -8,7 +8,7 @@ import * as path from "node:path";
 import * as fs from "node:fs";
 import { homedir } from "node:os";
 import type { UsageSnapshot, RateWindow, ProviderName } from "./types.js";
-import { fetchWithCache, getCached } from "./cache.js";
+import { fetchWithCache, getCached, isRateLimited, setRateLimited } from "./cache.js";
 
 /**
  * Resolver for live API keys from pi's model registry.
@@ -23,11 +23,8 @@ const API_TIMEOUT_MS = 5000;
 const REFRESH_INTERVAL_S = 60;
 const CACHE_TTL_MS = REFRESH_INTERVAL_S * 1000;
 
-/** Tracks 429 backoff — shared across all providers for the same token. */
-let rateLimitedUntil = 0;
-
 export function resetRateLimit(): void {
-	rateLimitedUntil = 0;
+	// No-op — rate limit is now managed in the shared cache file
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────
@@ -52,15 +49,15 @@ function timeoutFetch(url: string, init: RequestInit, ms = API_TIMEOUT_MS): Prom
 }
 
 async function fetchHttpWithRetry(url: string, init: RequestInit): Promise<Response> {
-	// Skip if we're in a backoff window from a previous 429
-	if (Date.now() < rateLimitedUntil) {
+	// Skip if ANY pi instance is in a backoff window (shared via cache file)
+	if (isRateLimited()) {
 		return new Response('{"error":{"type":"rate_limit","message":"Backing off"}}', { status: 429 });
 	}
 
 	const res = await timeoutFetch(url, init);
 	if (res.status === 429) {
-		// Back off for 5 minutes — don't retry, just wait for next refresh cycle
-		rateLimitedUntil = Date.now() + 5 * 60 * 1000;
+		// Back off for 5 minutes — written to cache file so all instances respect it
+		setRateLimited(5 * 60 * 1000);
 	}
 	return res;
 }
