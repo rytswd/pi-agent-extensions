@@ -8,7 +8,7 @@ import * as path from "node:path";
 import * as fs from "node:fs";
 import { homedir } from "node:os";
 import type { UsageSnapshot, RateWindow, ProviderName } from "./types.js";
-import { fetchWithCache, getCached, isRateLimited, setRateLimited } from "./cache.js";
+import { fetchWithCache, getCached, isRateLimited, setRateLimited, writeCachedUsage } from "./cache.js";
 
 /**
  * Resolver for live API keys from pi's model registry.
@@ -24,7 +24,8 @@ const REFRESH_INTERVAL_S = 60;
 const CACHE_TTL_MS = REFRESH_INTERVAL_S * 1000;
 
 export function resetRateLimit(): void {
-	// No-op — rate limit is now managed in the shared cache file
+	// Clear the shared file-based backoff so next fetch goes through
+	setRateLimited(0);
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────
@@ -279,11 +280,18 @@ export function fetchUsage(provider: ProviderName): Promise<UsageSnapshot> | und
 	return fetchWithCache(provider, CACHE_TTL_MS, fetcher);
 }
 
+/** Fetch directly, bypassing cache and rate limit. For manual /statusline refresh. */
+export function fetchUsageDirect(provider: ProviderName): Promise<UsageSnapshot> | undefined {
+	return DIRECT_FETCHERS[provider]?.();
+}
+
 // ── Refresh controller ───────────────────────────────────────────────────
 
 export interface UsageController {
 	current(): UsageSnapshot | undefined;
 	refresh(provider: ProviderName): Promise<UsageSnapshot | undefined>;
+	/** Force fetch bypassing cache and rate limit. For manual /statusline refresh. */
+	forceRefresh(provider: ProviderName): Promise<UsageSnapshot | undefined>;
 	start(getProvider: () => ProviderName | undefined): void;
 	stop(): void;
 }
@@ -313,13 +321,10 @@ export function createUsageController(onUpdate: (usage: UsageSnapshot | undefine
 
 	return {
 		current() {
-			// Also check shared file cache on read (another instance may have updated it)
-			if (!cached) return undefined;
 			return cached;
 		},
 
 		async refresh(provider) {
-			// First check file cache — may already be fresh from another instance
 			const fileCached = getCached(provider, CACHE_TTL_MS);
 			if (fileCached && fileCached.windows.length > 0) {
 				cached = fileCached;
@@ -327,6 +332,19 @@ export function createUsageController(onUpdate: (usage: UsageSnapshot | undefine
 				return cached;
 			}
 			return doRefresh(provider);
+		},
+
+		async forceRefresh(provider) {
+			const promise = fetchUsageDirect(provider);
+			if (!promise) return undefined;
+			const result = await promise;
+			lastFetchAt = Date.now();
+			if (result.windows.length > 0) {
+				cached = result;
+				writeCachedUsage(provider, result);
+			}
+			onUpdate(cached);
+			return result;
 		},
 
 		start(getProvider) {

@@ -3,8 +3,8 @@
  *
  * Format: model usage · thinking · path · vcs(git/jj) · context · cost
  *
- * Config stored in ~/.config/pi-statusline/ (Nix-store safe).
- * Usage cache shared across pi instances via ~/.config/pi-statusline/cache.json.
+ * Config: ~/.config/pi-agent-extensions/statusline/ (see .ref/config-dir.org).
+ * Usage cache shared across pi instances.
  * VCS: auto-detects jj (when .jj exists) or git.
  */
 
@@ -14,6 +14,8 @@ import { renderBar, buildBarContext, invalidateVcs, setExtensionStatuses } from 
 import { detectProvider, createUsageController, setApiKeyResolver, resetRateLimit } from "./src/providers.js";
 import { getCached } from "./src/cache.js";
 
+const STATUSLINE_SUBCMDS = "usage|bar|context|refresh";
+
 // ── Extension ────────────────────────────────────────────────────────────
 
 export default function statusline(pi: ExtensionAPI) {
@@ -21,7 +23,6 @@ export default function statusline(pi: ExtensionAPI) {
 	let enabled = true;
 	let currentCtx: ExtensionContext | undefined;
 	let tuiRef: any = null;
-	let footerDataRef: ReadonlyFooterDataProvider | null = null;
 	let getThinkingLevelFn: (() => string) | null = null;
 
 	// ── Usage controller ─────────────────────────────────────────────────
@@ -75,7 +76,6 @@ export default function statusline(pi: ExtensionAPI) {
 	function setupFooter(ctx: ExtensionContext): void {
 		if (!ctx.hasUI) return;
 		ctx.ui.setFooter((tui, _theme, footerData) => {
-			footerDataRef = footerData;
 			tuiRef = tui;
 			const unsub = footerData.onBranchChange(() => tui.requestRender());
 			return {
@@ -97,7 +97,6 @@ export default function statusline(pi: ExtensionAPI) {
 		if (ctx.modelRegistry?.getApiKeyForProvider) {
 			setApiKeyResolver((provider) => ctx.modelRegistry.getApiKeyForProvider(provider));
 		}
-		resetRateLimit();
 
 		const provider = currentProvider();
 		if (provider) {
@@ -184,13 +183,12 @@ export default function statusline(pi: ExtensionAPI) {
 		usage.stop();
 		currentCtx = undefined;
 		tuiRef = null;
-		footerDataRef = null;
 	});
 
 	// ── Command ──────────────────────────────────────────────────────────
 
 	pi.registerCommand("statusline", {
-		description: "Toggle statusline on/off, or configure: /statusline [usage|bar|context]",
+		description: `Toggle statusline on/off, or configure: /statusline [${STATUSLINE_SUBCMDS}]`,
 		handler: async (args, ctx) => {
 			currentCtx = ctx;
 			const arg = args?.trim().toLowerCase();
@@ -209,7 +207,6 @@ export default function statusline(pi: ExtensionAPI) {
 					ctx.ui.setWidget("statusline-bar", undefined);
 					ctx.ui.setFooter(undefined);
 					tuiRef = null;
-					footerDataRef = null;
 					ctx.ui.notify("Statusline disabled", "info");
 				}
 				return;
@@ -239,7 +236,29 @@ export default function statusline(pi: ExtensionAPI) {
 				return;
 			}
 
-			ctx.ui.notify("Usage: /statusline [usage|bar|context]", "info");
+			if (arg === "refresh") {
+				if (ctx.modelRegistry?.getApiKeyForProvider) {
+					setApiKeyResolver((provider) => ctx.modelRegistry.getApiKeyForProvider(provider));
+				}
+				resetRateLimit();
+				const provider = currentProvider();
+				if (provider) {
+					const result = await usage.forceRefresh(provider);
+					renderWidget();
+					if (result && result.windows.length > 0) {
+						ctx.ui.notify("Usage refreshed", "info");
+					} else {
+						const err = result?.error?.message ?? "no data";
+						const hint = err.includes("429") ? " — try /login to get a fresh token" : "";
+						ctx.ui.notify(`Usage refresh failed (${err})${hint}`, "warning");
+					}
+				} else {
+					ctx.ui.notify("No provider detected", "warning");
+				}
+				return;
+			}
+
+			ctx.ui.notify(`Usage: /statusline [${STATUSLINE_SUBCMDS}]`, "info");
 		},
 	});
 }

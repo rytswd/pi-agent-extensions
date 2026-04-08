@@ -133,7 +133,13 @@ export function isRateLimited(): boolean {
 	return Date.now() < until;
 }
 
-/** Set shared rate-limit backoff (written to cache file so all instances respect it). */
+/** Write a usage result directly to the shared cache file. */
+export function writeCachedUsage(provider: ProviderName, usage: UsageSnapshot): void {
+	const cache = readCacheFile();
+	(cache as any)[provider] = { fetchedAt: Date.now(), usage };
+	writeCacheFile(cache);
+}
+
 export function setRateLimited(durationMs: number): void {
 	const cache = readCacheFile();
 	cache._rateLimitedUntil = Date.now() + durationMs;
