@@ -56,8 +56,8 @@ async function fetchHttpWithRetry(url: string, init: RequestInit): Promise<Respo
 
 	const res = await timeoutFetch(url, init);
 	if (res.status === 429) {
-		// Back off for 5 minutes — written to cache file so all instances respect it
-		setRateLimited(5 * 60 * 1000);
+		// Back off for 15 minutes — written to cache file so all instances respect it
+		setRateLimited(15 * 60 * 1000);
 	}
 	return res;
 }

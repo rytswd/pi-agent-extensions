@@ -28,8 +28,10 @@
       "direnv",
       "fetch",
       "permission-gate",
+      "notify",
       "questionnaire",
       "slow-mode",
+      "stash",
       "statusline"
     ]
   }
