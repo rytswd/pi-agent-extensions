@@ -499,34 +499,14 @@ pi
 #+begin_example
 pi-agent-extensions/
 ├── statusline/         # Status bar with usage, VCS, context
-│   ├── index.ts
-│   └── src/
-│       ├── bar.ts      # Bar segment renderer
-│       ├── cache.ts    # Shared file-based cache
-│       ├── providers.ts # Anthropic + Codex usage fetching
-│       ├── settings.ts # XDG config management
-│       ├── types.ts    # Type definitions
-│       └── vcs.ts      # git + jj detection
-├── direnv/             # Direnv integration
-│   └── index.ts
-├── fetch/              # HTTP request tool
-│   └── index.ts
-├── questionnaire/      # Multi-question tool
-│   └── index.ts
 ├── stash/              # Editor text stash (Alt+S)
-│   └── index.ts
 ├── notify/             # Desktop notification on agent finish
-│   └── index.ts
 ├── slow-mode/          # Review gate for write/edit
-│   ├── index.ts
-│   └── package.json
-├── package.json        # Package metadata and extension list
-├── .gitignore
-├── AGENTS.md           # Agent context for AI assistants
-├── air/                # Air documentation (development planning)
-│   ├── context/        # Project context files
-│   └── ...
-└── README.org          # This file
+├── fetch/              # HTTP request tool
+├── questionnaire/      # Multi-question tool
+├── direnv/             # Direnv integration
+├── package.json
+└── README.org
 #+end_example
 
 ** 🔧 Adding New Extensions
