@@ -152,6 +152,34 @@ Usage colours: dim when fine, yellow when >70% used, red when >90% used.
 #+html:</details>
 
 #+html:<details>
+#+html:<summary><strong>stash</strong> - Save and restore editor text with Alt+S</summary>
+#+html:<br>
+
+- *Source*: [[https://github.com/rytswd/pi-agent-extensions/tree/main/stash][stash/]]
+- *License*: MIT
+- *Shortcut*: =Alt+S=
+- *Status indicator*: =📋 N= (stash count, shown in statusline)
+
+*Description*: Stash your editor content to quickly type a different prompt, then restore it when done. Supports up to 9 separate stashes. Inspired by [[https://github.com/nicobailon/pi-powerline-footer][pi-powerline-footer]]'s editor stash feature.
+
+*Features*:
+- =Alt+S= with text: stashes and clears the editor
+- =Alt+S= with empty editor, 1 stash: restores immediately
+- =Alt+S= with empty editor, 2+ stashes: shows picker
+- Auto-restores most recent stash when the agent finishes (if editor is empty)
+- Stash indicator in statusline shows count
+
+*Picker key bindings* (2+ stashes):
+| Key     | Action          |
+|---------+-----------------|
+| =↑↓=    | Navigate        |
+| =Enter= | Restore selected |
+| =x= / =d= | Delete selected  |
+| =Esc=   | Cancel          |
+
+#+html:</details>
+
+#+html:<details>
 #+html:<summary><strong>slow-mode</strong> - Review gate for <code>write</code> and <code>edit</code> tool calls</summary>
 #+html:<br>
 
@@ -435,6 +463,7 @@ pi
 
 *** Try the Extensions
 
+- *stash:* Press =Alt+S= to stash editor text, =Alt+S= again to restore
 - *slow-mode:* Type =/slow-mode= to toggle the review gate
 - *fetch:* The LLM will use it for HTTP requests — try asking it to fetch a URL
 - *questionnaire:* The LLM will call it automatically when needed
@@ -459,6 +488,8 @@ pi-agent-extensions/
 ├── fetch/              # HTTP request tool
 │   └── index.ts
 ├── questionnaire/      # Multi-question tool
+│   └── index.ts
+├── stash/              # Editor text stash (Alt+S)
 │   └── index.ts
 ├── slow-mode/          # Review gate for write/edit
 │   ├── index.ts
