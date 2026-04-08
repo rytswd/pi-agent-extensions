@@ -75,7 +75,7 @@ export default function slowMode(pi: ExtensionAPI) {
       enabled = !enabled;
       if (enabled) {
         // Show status bar indicator when active
-        ctx.ui.setStatus("slow-mode", ctx.ui.theme.fg("warning", "slow ■"));
+        ctx.ui.setStatus("slow-mode", ctx.ui.theme.fg("warning", "\uf256 slow"));
         ctx.ui.notify("Slow mode enabled — write/edit changes require approval", "info");
       } else {
         // Clear status bar indicator when disabled
