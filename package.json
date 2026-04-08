@@ -27,8 +27,8 @@
     "extensions": [
       "direnv",
       "fetch",
-      "permission-gate",
       "notify",
+      "permission-gate",
       "questionnaire",
       "slow-mode",
       "stash",
