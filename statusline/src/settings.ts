@@ -1,6 +1,6 @@
 /**
- * Settings management — stores config in ~/.config/pi-statusline/
- * Safe for read-only filesystems (Nix store).
+ * Settings management — stores config in ~/.config/pi-agent-extensions/statusline/
+ * Configurable via ~/.pi/agent/pi-agent-extensions.json. See .ref/config-dir.org.
  */
 
 import * as fs from "node:fs";
@@ -9,10 +9,15 @@ import { homedir } from "node:os";
 import type { StatuslineSettings } from "./types.js";
 import { DEFAULT_SETTINGS } from "./types.js";
 
+/** Resolve config directory. See .ref/config-dir.org for convention. */
 function getConfigDir(): string {
-	const xdg = process.env.XDG_CONFIG_HOME;
-	const base = xdg || path.join(homedir(), ".config");
-	return path.join(base, "pi-statusline");
+	const override = path.join(homedir(), ".pi", "agent", "pi-agent-extensions.json");
+	try {
+		const cfg = JSON.parse(fs.readFileSync(override, "utf-8"));
+		if (cfg.configDir) return path.join(cfg.configDir, "statusline");
+	} catch {}
+	const base = process.env.XDG_CONFIG_HOME || path.join(homedir(), ".config");
+	return path.join(base, "pi-agent-extensions", "statusline");
 }
 
 function getSettingsPath(): string {
@@ -21,17 +26,31 @@ function getSettingsPath(): string {
 
 let cached: StatuslineSettings | undefined;
 
+/** Old config path for migration. */
+function getOldSettingsPath(): string {
+	const base = process.env.XDG_CONFIG_HOME || path.join(homedir(), ".config");
+	return path.join(base, "pi-statusline", "settings.json");
+}
+
 export function loadSettings(): StatuslineSettings {
 	if (cached) return cached;
 	try {
+		// Try new location first
 		const p = getSettingsPath();
-		if (!fs.existsSync(p)) {
-			cached = { ...DEFAULT_SETTINGS };
-			return cached;
+		if (fs.existsSync(p)) {
+			const raw = JSON.parse(fs.readFileSync(p, "utf-8"));
+			cached = { ...DEFAULT_SETTINGS, ...raw };
+			return cached!;
 		}
-		const raw = JSON.parse(fs.readFileSync(p, "utf-8"));
-		cached = { ...DEFAULT_SETTINGS, ...raw };
-		return cached!;
+		// Fall back to old location
+		const old = getOldSettingsPath();
+		if (fs.existsSync(old)) {
+			const raw = JSON.parse(fs.readFileSync(old, "utf-8"));
+			cached = { ...DEFAULT_SETTINGS, ...raw };
+			return cached!;
+		}
+		cached = { ...DEFAULT_SETTINGS };
+		return cached;
 	} catch {
 		cached = { ...DEFAULT_SETTINGS };
 		return cached;

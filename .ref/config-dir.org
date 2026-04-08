@@ -1,0 +1,68 @@
+#+title: Config Directory Convention
+#+FILETAGS: :reference:convention:
+
+* Overview
+
+Extensions that need persistent config, cache, or state store files under a single namespace:
+
+#+begin_example
+~/.config/pi-agent-extensions/<extension-name>/
+#+end_example
+
+This avoids scattering =~/.config/pi-*= directories and provides a single override point.
+
+* Resolution Order
+
+1. Read =~/.pi/agent/pi-agent-extensions.json= for a =configDir= override.
+2. Use =$XDG_CONFIG_HOME/pi-agent-extensions/= if the env var is set.
+3. Fall back to =~/.config/pi-agent-extensions/=.
+
+The override file is optional — no file needed for the default case.
+
+#+begin_src json
+// ~/.pi/agent/pi-agent-extensions.json (optional)
+{
+  "configDir": "/custom/path/to/config"
+}
+#+end_src
+
+* Code Snippet
+
+Copy this into any extension that needs a config directory. Replace ="statusline"= with the extension name.
+
+#+begin_src typescript
+function getConfigDir(): string {
+    const override = path.join(homedir(), ".pi", "agent", "pi-agent-extensions.json");
+    try {
+        const cfg = JSON.parse(fs.readFileSync(override, "utf-8"));
+        if (cfg.configDir) return path.join(cfg.configDir, "statusline");
+    } catch {}
+    const base = process.env.XDG_CONFIG_HOME || path.join(homedir(), ".config");
+    return path.join(base, "pi-agent-extensions", "statusline");
+}
+#+end_src
+
+Requires these imports (likely already present):
+
+#+begin_src typescript
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { homedir } from "node:os";
+#+end_src
+
+* Which Extensions Use This
+
+| Extension | Config files | Notes |
+|-----------+---------------------------------------+------------------------------|
+| statusline | =settings.json=, =cache.json=, =cache.lock= | Settings + shared usage cache |
+| permission-gate | =rules.json= | User-defined rules (planned) |
+
+Extensions that don't need persistent config (stash, notify, slow-mode, fetch, direnv, questionnaire) don't use this.
+
+* Project-Local Config
+
+Per-project overrides remain at =<cwd>/.pi/<extension-name>.json= — not affected by this convention.
+
+* Extra Repo
+
+=pi-agent-extensions-extra= follows the same pattern with its own namespace: =~/.config/pi-agent-extensions-extra/<name>/=, overridable via =~/.pi/agent/pi-agent-extensions-extra.json=.

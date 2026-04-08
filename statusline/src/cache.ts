@@ -14,9 +14,15 @@ import type { UsageSnapshot, ProviderName } from "./types.js";
 
 // ── Paths ────────────────────────────────────────────────────────────────
 
+/** Resolve config directory. See .ref/config-dir.org for convention. */
 function configDir(): string {
-	const xdg = process.env.XDG_CONFIG_HOME;
-	return path.join(xdg || path.join(homedir(), ".config"), "pi-statusline");
+	const override = path.join(homedir(), ".pi", "agent", "pi-agent-extensions.json");
+	try {
+		const cfg = JSON.parse(fs.readFileSync(override, "utf-8"));
+		if (cfg.configDir) return path.join(cfg.configDir, "statusline");
+	} catch {}
+	const base = process.env.XDG_CONFIG_HOME || path.join(homedir(), ".config");
+	return path.join(base, "pi-agent-extensions", "statusline");
 }
 
 function cachePath(): string {
@@ -74,12 +80,20 @@ interface CacheFile {
 	[provider: string]: CacheEntry | number | undefined;
 }
 
+/** Old cache path for migration. */
+function oldCachePath(): string {
+	const base = process.env.XDG_CONFIG_HOME || path.join(homedir(), ".config");
+	return path.join(base, "pi-statusline", "cache.json");
+}
+
 function readCacheFile(): CacheFile {
 	try {
+		// Try new location first, fall back to old
 		const p = cachePath();
-		if (!fs.existsSync(p)) return {};
-		const content = fs.readFileSync(p, "utf-8");
-		return JSON.parse(content) as CacheFile;
+		if (fs.existsSync(p)) return JSON.parse(fs.readFileSync(p, "utf-8")) as CacheFile;
+		const old = oldCachePath();
+		if (fs.existsSync(old)) return JSON.parse(fs.readFileSync(old, "utf-8")) as CacheFile;
+		return {};
 	} catch {
 		return {};
 	}
