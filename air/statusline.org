@@ -46,13 +46,13 @@ statusline/
 ** Status Bar Format
 
 #+begin_example
- Opus 4.6 ❯ 5h:4%│W:65% 1d22h ❯ 12%/1.0M ❯ think:med ❯ myproject ❯ ◆ main ~2 +3 ❯ slow ■ ❯  proj
+ Opus 4.6 ❯ 5h:4%│W:65% 1d22h ❯ 24k/1.0M ❯ think:med ❯ myproject ❯ ◆ main ~2 +3 ❯ slow ■ ❯  proj
 #+end_example
 
 Segments (left to right):
 - *Model*: Current model with "Claude " prefix stripped.
 - *Usage*: Subscription windows (5h/Week/Extra for Anthropic, primary/secondary for Codex). Reset timer shown when usage >50%. Colour-coded: dim (<70%), yellow (70-90%), red (>90%).
-- *Context*: Context window usage percentage. Colour warnings at 70% and 90%.
+- *Context*: Context token count (default: =24k/1.0M=) or percentage (=12%/1.0M=). Toggle with =/statusline context=. Colour warnings at 70% and 90%.
 - *Thinking*: Thinking level abbreviation (hidden when "off").
 - *Path*: Current directory basename.
 - *VCS*: Auto-detects jj (◆ icon, bookmark/change-id) or git (branch). Shows ~modified +added -removed counts.

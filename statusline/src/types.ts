@@ -58,5 +58,5 @@ export interface StatuslineSettings {
 export const DEFAULT_SETTINGS: StatuslineSettings = {
 	showUsage: true,
 	showBar: true,
-	contextFormat: "percent",
+	contextFormat: "absolute",
 };
