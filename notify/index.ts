@@ -68,6 +68,10 @@ export default function notify(pi: ExtensionAPI) {
 	}
 
 	pi.on("session_start", async (_event, ctx) => {
+		// PI_NO_NOTIFY=1 disables notifications at startup
+		if (process.env.PI_NO_NOTIFY === "1") {
+			enabled = false;
+		}
 		updateStatus(ctx);
 	});
 

@@ -48,12 +48,25 @@ Provides a condensed status bar below the editor showing model info, subscriptio
 - **Commands**: `/statusline`, `/statusline usage`, `/statusline bar`
 - **Air doc**: `air/statusline.org`
 
-### direnv.ts
-Loads [direnv](https://direnv.net/) environment variables into pi sessions. Runs on session start and after every bash command to pick up `.envrc` changes. Displays status in the pi status bar.
+### stash/
+Save and restore editor text with Alt+S. Supports up to 9 stash slots with a picker (Enter=restore, x/d=delete). Status shows 📋 N in the statusline.
+
+- **Shortcut**: Alt+S
+- **Events**: `agent_end` (auto-restore), `session_start` (reset)
+
+### notify/
+Desktop notification when the agent finishes via terminal OSC escape sequences. Supports Ghostty, iTerm2, WezTerm, Kitty, and Windows Terminal.
+
+- **Command**: `/notify` toggle
+- **Events**: `agent_start`, `turn_start`, `tool_result`, `agent_end`
+- **Env**: `PI_NO_NOTIFY=1` to disable at startup
+- **Inspired by**: [aldoborrero/pi-agent-kit/notify](https://github.com/aldoborrero/pi-agent-kit/tree/main/extensions/notify)
+
+### direnv/
+Loads [direnv](https://direnv.net/) environment variables into pi sessions by prepending `direnv export bash` to every bash tool call. This ensures `.envrc` changes are always picked up.
 
 - **Origin**: Based on [Mic92's implementation](https://github.com/Mic92/dotfiles/blob/main/home/.pi/agent/extensions/direnv.ts)
-- **Events**: `session_start`, `tool_result` (bash only)
-- **Status bar**: `direnv …` (running) · `direnv ✓` (loaded) · `direnv ✗` (error)
+- **Events**: `tool_call` (bash only — prepends direnv export)
 
 ### questionnaire.ts
 Registers a `questionnaire` tool that the LLM can call to ask the user single or multiple-choice questions. Supports tab navigation for multi-question flows, free-text "type something" option, and a submit review screen.
