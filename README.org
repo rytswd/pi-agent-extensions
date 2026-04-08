@@ -328,6 +328,29 @@ Tab/←→ navigate • ↑↓ select • Enter confirm • Esc cancel
 #+html:</details>
 
 #+html:<details>
+#+html:<summary><strong>notify</strong> - Desktop notification when agent finishes</summary>
+#+html:<br>
+
+- *Source*: [[https://github.com/rytswd/pi-agent-extensions/tree/main/notify][notify/]]
+- *License*: MIT
+- *Toggle*: =/notify=
+- *Status indicator*: =notify:off= (shown when disabled)
+- *Inspired by*: [[https://github.com/aldoborrero/pi-agent-kit/tree/main/extensions/notify][aldoborrero/pi-agent-kit/notify]]
+
+*Description*: Sends a native terminal notification when the agent finishes and is waiting for input. Useful when multitasking — you get a desktop ping when the agent is done.
+
+*Supported terminals*:
+- OSC 777: Ghostty, iTerm2, WezTerm, rxvt-unicode
+- OSC 99: Kitty
+- Windows toast: Windows Terminal (WSL)
+
+*Notification content*:
+- Title: =Pi · <project-name>=
+- Body: first sentence of the last assistant message + stats (elapsed time, turns, files changed)
+
+#+html:</details>
+
+#+html:<details>
 #+html:<summary><strong>fetch</strong> - HTTP request tool without bash/curl</summary>
 #+html:<br>
 
@@ -464,6 +487,7 @@ pi
 *** Try the Extensions
 
 - *stash:* Press =Alt+S= to stash editor text, =Alt+S= again to restore
+- *notify:* Desktop notification when agent finishes — =/notify= to toggle
 - *slow-mode:* Type =/slow-mode= to toggle the review gate
 - *fetch:* The LLM will use it for HTTP requests — try asking it to fetch a URL
 - *questionnaire:* The LLM will call it automatically when needed
@@ -490,6 +514,8 @@ pi-agent-extensions/
 ├── questionnaire/      # Multi-question tool
 │   └── index.ts
 ├── stash/              # Editor text stash (Alt+S)
+│   └── index.ts
+├── notify/             # Desktop notification on agent finish
 │   └── index.ts
 ├── slow-mode/          # Review gate for write/edit
 │   ├── index.ts
@@ -536,6 +562,7 @@ See the [[https://github.com/mariozechner/pi][pi documentation]] for the full ex
 - [[https://github.com/Mic92][Mic92]]: Original direnv implementation ([[https://github.com/Mic92/dotfiles/blob/main/home/.pi/agent/extensions/direnv.ts][source]])
 - [[https://github.com/marckrenn][marckrenn]]: [[https://github.com/marckrenn/pi-sub][pi-sub]] — inspiration for subscription usage tracking
 - [[https://github.com/nicobailon][nicobailon]]: [[https://github.com/nicobailon/pi-powerline-footer][pi-powerline-footer]] — inspiration for powerline-style status bar
+- [[https://github.com/aldoborrero][aldoborrero]]: [[https://github.com/aldoborrero/pi-agent-kit][pi-agent-kit]] — inspiration for notify, and a great collection of pi extensions
 
 ** 📄 License
 
