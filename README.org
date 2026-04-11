@@ -328,6 +328,71 @@ Tab/←→ navigate • ↑↓ select • Enter confirm • Esc cancel
 #+html:</details>
 
 #+html:<details>
+#+html:<summary><strong>permission-gate</strong> - Confirm dangerous bash commands, with free-text rejection reason</summary>
+#+html:<br>
+
+- *Source*: [[https://github.com/rytswd/pi-agent-extensions/tree/main/permission-gate][permission-gate/]]
+- *License*: MIT
+- *Toggle*: =/permission-gate=
+- *Status bar*: =gate ■= (when active)
+- *Config*: =~/.pi/agent/permission-gate.json=, =.pi/permission-gate.json=
+- *Credit*: Based on the upstream =examples/extensions/permission-gate.ts=
+
+*Description*: Intercepts =bash= tool calls and matches the command against a regex blacklist. On a match it shows a Yes/No prompt; selecting "No" opens an inline editor so you can tell the assistant /why/ the command was rejected — the text is returned as the block reason and ends up in the assistant's tool result.
+
+*Default patterns* (case-insensitive): =rm -r=, =sudo=, =chmod 777=, redirects to =/dev/sd*=, =git push -f=, =git reset --hard=, =git clean -f=, =git restore=, =curl|wget … | sh=.
+
+*Config file format*:
+
+#+begin_src jsonc
+{
+  "replace": false,            // true = discard built-ins and earlier files
+  "patterns": [
+    { "pattern": "\\bssh\\b", "label": "ssh" },
+    { "pattern": "\\bmsmtp\\b", "label": "send email", "flags": "i" }
+  ]
+}
+#+end_src
+
+Resolution order: built-in defaults → =~/.pi/agent/permission-gate.json= → =<cwd>/.pi/permission-gate.json=. Each file appends unless it sets ={"replace": true}=. Invalid JSON or regex falls back to defaults with a warning notification.
+
+*What it looks like*:
+
+#+begin_example
+
+ ⚠️  Dangerous command (sudo)
+    sudo id
+
+   Yes
+ > No ✎
+
+ Reason:
+ ┌──────────────────────────────────────────────────────────┐
+ │ use the wrapper script instead                           │
+ └──────────────────────────────────────────────────────────┘
+
+ Enter submit • Esc back
+
+#+end_example
+
+The assistant then sees:
+
+#+begin_example
+Blocked by user (sudo): use the wrapper script instead
+#+end_example
+
+*Key bindings*:
+| Key     | Action                                    |
+|---------+-------------------------------------------|
+| =↑↓=    | Select Yes / No                           |
+| =Enter= | Confirm (on No: opens reason editor)      |
+| =Esc=   | Block without reason / back from editor   |
+
+*Events*: emits =permission-gate:waiting= / =permission-gate:resolved= for other extensions (e.g. notify) to hook into.
+
+#+html:</details>
+
+#+html:<details>
 #+html:<summary><strong>notify</strong> - Desktop notification when agent finishes</summary>
 #+html:<br>
 
