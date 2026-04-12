@@ -134,7 +134,7 @@ Segments (left to right):
 |-----------+----------------------+-----------------------------------------|
 | Model     | =Opus 4.6=           | Current model (stripped "Claude " prefix) |
 | Usage     | =5h:4%│W:65% 1d22h=  | Subscription usage, reset time when >50% |
-| Context   | =12%/1.0M=           | Context window usage                    |
+| Context   | =12%/1.0M=           | Context window usage (or =24k/1.0M= with =contextFormat: absolute=) |
 | Thinking  | =think:med=          | Thinking level (hidden when off)         |
 | Path      | =myproject=          | Current directory basename               |
 | VCS       | =◆ main ~2 +3=       | jj(◆)/git branch with file counts       |
@@ -148,6 +148,7 @@ Usage colours: dim when fine, yellow when >70% used, red when >90% used.
 | =/statusline=        | Toggle on/off          |
 | =/statusline usage=  | Toggle usage display   |
 | =/statusline bar=    | Toggle entire bar      |
+| =/statusline context= | Toggle percent/absolute context tokens |
 
 #+html:</details>
 
