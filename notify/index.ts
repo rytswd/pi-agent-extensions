@@ -20,13 +20,26 @@ function sanitize(s: string): string {
 	return s.replace(/[\x00-\x1f\x7f;]/g, " ").trim();
 }
 
+/**
+ * tmux only forwards unknown OSC sequences to the outer terminal when they
+ * are wrapped in its DCS passthrough (\ePtmux;...\e\\) — even with
+ * `allow-passthrough on`. Detect tmux via $TMUX and double-escape ESC bytes.
+ */
+function writeEscape(seq: string): void {
+	if (process.env.TMUX) {
+		process.stdout.write(`\x1bPtmux;${seq.replaceAll("\x1b", "\x1b\x1b")}\x1b\\`);
+	} else {
+		process.stdout.write(seq);
+	}
+}
+
 function notifyOSC777(title: string, body: string): void {
-	process.stdout.write(`\x1b]777;notify;${sanitize(title)};${sanitize(body)}\x07`);
+	writeEscape(`\x1b]777;notify;${sanitize(title)};${sanitize(body)}\x07`);
 }
 
 function notifyOSC99(title: string, body: string): void {
-	process.stdout.write(`\x1b]99;i=1:d=0;${sanitize(title)}\x1b\\`);
-	process.stdout.write(`\x1b]99;i=1:p=body;${sanitize(body)}\x1b\\`);
+	writeEscape(`\x1b]99;i=1:d=0;${sanitize(title)}\x1b\\`);
+	writeEscape(`\x1b]99;i=1:p=body;${sanitize(body)}\x1b\\`);
 }
 
 function notifyWindows(title: string, body: string): void {
