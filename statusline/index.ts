@@ -59,7 +59,7 @@ export default function statusline(pi: ExtensionAPI) {
 					if (!currentCtx) return [];
 					const thinkingLevel = getThinkingLevelFn?.() ?? "off";
 					const subUsage = settings.showUsage ? getUsage() : undefined;
-					const barCtx = buildBarContext(currentCtx, thinkingLevel, subUsage);
+					const barCtx = buildBarContext(currentCtx, thinkingLevel, subUsage, settings.contextFormat);
 					const line = renderBar(theme, barCtx, width);
 					if (!line) return [];
 					return [line];
@@ -190,7 +190,7 @@ export default function statusline(pi: ExtensionAPI) {
 	// ── Command ──────────────────────────────────────────────────────────
 
 	pi.registerCommand("statusline", {
-		description: "Toggle statusline on/off, or configure: /statusline [usage|bar]",
+		description: "Toggle statusline on/off, or configure: /statusline [usage|bar|context]",
 		handler: async (args, ctx) => {
 			currentCtx = ctx;
 			const arg = args?.trim().toLowerCase();
@@ -223,6 +223,14 @@ export default function statusline(pi: ExtensionAPI) {
 				return;
 			}
 
+			if (arg === "context") {
+				settings.contextFormat = settings.contextFormat === "percent" ? "absolute" : "percent";
+				saveSettings(settings);
+				renderWidget();
+				ctx.ui.notify(`Context: ${settings.contextFormat}`, "info");
+				return;
+			}
+
 			if (arg === "bar") {
 				settings.showBar = !settings.showBar;
 				saveSettings(settings);
@@ -231,7 +239,7 @@ export default function statusline(pi: ExtensionAPI) {
 				return;
 			}
 
-			ctx.ui.notify("Usage: /statusline [usage|bar]", "info");
+			ctx.ui.notify("Usage: /statusline [usage|bar|context]", "info");
 		},
 	});
 }

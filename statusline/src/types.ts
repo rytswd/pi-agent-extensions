@@ -44,14 +44,19 @@ export interface UsageSnapshot {
 
 // ── Settings ─────────────────────────────────────────────────────────────
 
+export type ContextFormat = "percent" | "absolute";
+
 export interface StatuslineSettings {
 	/** Show usage widget below editor */
 	showUsage: boolean;
 	/** Show status bar below editor */
 	showBar: boolean;
+	/** How to render context-window usage: "42%/200k" vs "84k/200k" */
+	contextFormat: ContextFormat;
 }
 
 export const DEFAULT_SETTINGS: StatuslineSettings = {
 	showUsage: true,
 	showBar: true,
+	contextFormat: "percent",
 };

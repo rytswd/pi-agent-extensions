@@ -8,7 +8,7 @@ import type { AssistantMessage } from "@mariozechner/pi-ai";
 import { visibleWidth, truncateToWidth } from "@mariozechner/pi-tui";
 import { basename } from "node:path";
 import { getVcsStatus, invalidateVcs } from "./vcs.js";
-import type { UsageSnapshot } from "./types.js";
+import type { ContextFormat, UsageSnapshot } from "./types.js";
 
 // ── Extension statuses ───────────────────────────────────────────────────
 
@@ -63,8 +63,10 @@ export interface BarContext {
 	sessionBranch: ReturnType<any>;
 	usingSubscription: boolean;
 	usage: { input: number; output: number; cacheRead: number; cacheWrite: number; cost: number };
+	contextTokens: number;
 	contextPercent: number;
 	contextWindow: number;
+	contextFormat: ContextFormat;
 	/** Subscription usage snapshot (from providers) */
 	subUsage: UsageSnapshot | undefined;
 }
@@ -144,7 +146,8 @@ function segContext(theme: Theme, ctx: BarContext): string | null {
 	if (!ctx.contextWindow) return null;
 	const pct = ctx.contextPercent;
 	const color = pct > 90 ? "error" : pct > 70 ? "warning" : "dim";
-	return theme.fg(color, `${pct.toFixed(0)}%/${fmtTokens(ctx.contextWindow)}`);
+	const used = ctx.contextFormat === "absolute" ? fmtTokens(ctx.contextTokens) : `${pct.toFixed(0)}%`;
+	return theme.fg(color, `${used}/${fmtTokens(ctx.contextWindow)}`);
 }
 
 function segCost(theme: Theme, ctx: BarContext): string | null {
@@ -178,7 +181,12 @@ export function renderBar(theme: Theme, ctx: BarContext, width: number): string 
 /**
  * Compute BarContext from an ExtensionContext.
  */
-export function buildBarContext(ctx: any, thinkingLevel: string, subUsage?: UsageSnapshot): BarContext {
+export function buildBarContext(
+	ctx: any,
+	thinkingLevel: string,
+	subUsage?: UsageSnapshot,
+	contextFormat: ContextFormat = "percent",
+): BarContext {
 	let input = 0,
 		output = 0,
 		cacheRead = 0,
@@ -214,8 +222,10 @@ export function buildBarContext(ctx: any, thinkingLevel: string, subUsage?: Usag
 		sessionBranch: null,
 		usingSubscription,
 		usage: { input, output, cacheRead, cacheWrite, cost },
+		contextTokens,
 		contextPercent,
 		contextWindow,
+		contextFormat,
 		subUsage: subUsage,
 	};
 }
