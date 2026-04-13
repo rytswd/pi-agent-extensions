@@ -4,62 +4,58 @@
 
 * Summary
 
-A configurable safety gate that intercepts tool calls and prompts for confirmation before executing potentially dangerous operations. Covers bash commands (destructive shell ops), and optionally write/edit calls (complementing slow-mode).
+A configurable safety gate that intercepts bash tool calls and prompts for confirmation before executing dangerous commands. Selecting "No" opens an inline editor to provide a free-text rejection reason that is fed back to the assistant.
 
-Based on pi's built-in [[https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/examples/extensions/permission-gate.ts][permission-gate example]], extended with user-configurable rules and broader tool coverage.
+Based on pi's built-in [[https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/examples/extensions/permission-gate.ts][permission-gate example]] and [[https://github.com/rytswd/pi-agent-extensions/pull/13][PR #13 by Mic92]].
 
 * Motivation
 
-The built-in example only blocks 3 bash patterns (=rm -rf=, =sudo=, =chmod 777=). Real-world use needs more patterns, the ability to customise them per project, and optionally gating bash commands in general (as requested in [[https://github.com/rytswd/pi-agent-extensions/issues/4][#4]]).
+The built-in example only blocks 3 bash patterns (=rm -rf=, =sudo=, =chmod 777=). Real-world use needs more patterns, the ability to customise them per project, and free-text rejection reasons so the assistant can adjust (as discussed in [[https://github.com/rytswd/pi-agent-extensions/issues/4][#4]]).
 
 slow-mode already gates write/edit, but permission-gate serves a different purpose: it's always-on protection against dangerous commands, not a review workflow. They complement each other.
 
 ** Goals
-- Configurable pattern lists — users can add/remove rules without editing code.
+- Configurable pattern lists — users can add/remove rules via =/gate add|rm= or by editing config files.
 - Project-local overrides — different projects have different danger zones.
-- Bash gating mode — optionally require confirmation for ALL bash commands, not just pattern-matched ones (addresses [[https://github.com/rytswd/pi-agent-extensions/issues/4][#4]]).
-- Clear labels — show WHY a command was flagged ("force push", "recursive delete", "send email").
-- Status bar indicator — show gate state in statusline.
+- Free-text rejection reason — tell the assistant /why/ the command was blocked.
+- Clear labels — show WHY a command was flagged ("force push", "recursive delete").
+- Status bar indicator — = gate= shown in statusline.
 - Toggle — =/gate= to enable/disable.
+- Fallback safety — if all user rules fail to compile, defaults are restored automatically.
 - Non-interactive safety — block by default when no UI available (headless/print mode).
+- Desktop notification — emits =permission-gate:waiting= event consumed by notify extension.
 
 ** Non-Goals
-- Replacing slow-mode for write/edit review (slow-mode has diff display, external viewers, etc.).
+- Replacing slow-mode for write/edit review.
+- Gating every bash command (removed — too noisy, use =/gate add= for specific patterns instead).
 - Sandboxing or filesystem isolation.
-- Network-level blocking.
 
 * Proposal
 
 ** Default Rules
 
-Dangerous bash patterns (from pi's example + Aldo's extended set + community suggestions):
-
 | Category | Pattern | Label |
 |----------+-------------------------------------------+-----------------------------|
 | Delete | =rm -rf=, =rm --recursive= | recursive delete |
 | Privilege | =sudo= | sudo |
-| Permissions | =chmod 777=, =chown 777= | world-writable permissions |
+| Permissions | =chmod 777= | world-writable permissions |
 | Device | => /dev/sd*= | raw device redirect |
 | Git destructive | =git push -f=, =git reset --hard= | force push, hard reset |
 | Git clean | =git clean -f= | git clean |
 | Git restore | =git checkout .=, =git restore= | discard changes |
 | Network exec | =curl \| sh=, =wget \| sh= | pipe to shell |
-| GitHub CLI | =gh pr create=, =gh issue create= | create PR/issue |
-| GitHub CLI | =gh pr merge=, =gh repo delete= | modify PR/repo |
-| jj destructive | =jj abandon=, =jj squash= | jj abandon/squash |
+| GitHub CLI | =gh repo (create\vert{}delete\vert{}archive)= | modify GitHub repo |
+| GitHub CLI | =gh release (create\vert{}delete)= | modify GitHub release |
 
 ** Configuration
 
-=~/.config/pi-agent-extensions/permission-gate/rules.json=:
+=~/.config/pi-agent-extensions/permission-gate/rules.json= (see =.ref/config-dir.org=):
 
 #+begin_src json
 {
-  "rules": [
-    { "pattern": "\\bgit\\s+push\\s+.*(-f|--force)", "label": "force push" },
-    { "pattern": "\\bsudo\\b", "label": "sudo" }
-  ],
   "extraRules": [
-    { "pattern": "\\bdocker\\s+rm\\b", "label": "docker remove" }
+    { "pattern": "\\bdocker\\s+rm\\b", "label": "docker remove" },
+    { "pattern": "\\bterraform\\s+destroy\\b", "label": "terraform destroy" }
   ],
   "disabledRules": ["sudo"]
 }
@@ -67,81 +63,106 @@ Dangerous bash patterns (from pi's example + Aldo's extended set + community sug
 
 | Field | Description |
 |---------------+----------------------------------------------|
-| =rules= | Override the default rule set entirely |
+| =rules= | Override the default rule set entirely (replaces all built-ins) |
 | =extraRules= | Add rules on top of defaults |
-| =disabledRules= | Disable specific default rules by label |
+| =disabledRules= | Disable specific rules by label |
 
-Project-local overrides at =<cwd>/.pi/permission-gate.json= — merged on top of global config. This follows the consolidated config pattern: all extensions store config under =~/.config/pi/<name>/=. For example, a deploy project might add:
+Each rule entry:
+| Field | Description |
+|----------+--------------------------------------|
+| =pattern= | Regex string (compiled with =new RegExp=) |
+| =label= | Short name shown in the prompt |
+| =flags= | Optional regex flags (default: ="i"= for case-insensitive) |
+
+Project-local overrides at =<cwd>/.pi/permission-gate.json= — merged on top of global config:
 
 #+begin_src json
 {
   "extraRules": [
-    { "pattern": "\\bterraform\\s+destroy\\b", "label": "terraform destroy" },
     { "pattern": "\\bkubectl\\s+delete\\b", "label": "kubectl delete" }
   ]
 }
 #+end_src
 
+Rules can also be managed interactively via =/gate add= and =/gate rm=, which write to the global config file.
+
 ** Commands
 
-| Command | Description |
-|-----------------+---------------------------------------------|
-| =/gate= | Toggle on/off |
-| =/gate rules= | Show active rules |
-| =/gate add= | Add a rule interactively (pattern + label) |
-| =/gate remove= | Remove a rule by label |
+| Command | Alias | Description |
+|-----------------+-------+---------------------------------------------|
+| =/gate= | | Toggle on/off |
+| =/gate list= | =ls= | Show active rules (grouped by source) |
+| =/gate add= | | Add a rule interactively (pattern + label) |
+| =/gate remove= | =rm= | Remove a rule by label |
 
 ** Interaction Flow
 
 #+begin_example
 Agent calls bash: git push --force origin main
 
-  ⚠️ Dangerous command detected (force push):
+  ⚠️ Dangerous command (force push)
+  git push --force origin main
 
-    git push --force origin main
-
-  Allow?
   > Yes
     No
-    Always (disable this rule for session)
+
+  ↑↓ • Enter • Esc block
 #+end_example
 
-The "Always" option disables the specific rule for the current session — useful when you're intentionally doing a series of force pushes.
+Selecting "No" opens an inline editor:
+
+#+begin_example
+  > Yes
+    No ✎
+
+  Reason:
+  ┌──────────────────────────────────────────────────────┐
+  │ use the wrapper script instead                       │
+  └──────────────────────────────────────────────────────┘
+
+  Enter submit • Esc back
+#+end_example
+
+The assistant then sees: =Blocked by user (force push): use the wrapper script instead=
 
 ** Relationship to slow-mode
 
 | Feature | permission-gate | slow-mode |
 |---------+---------------------------------+---------------------------------|
-| Tools | bash (+ optionally write/edit) | write, edit only |
+| Tools | bash only | write, edit only |
 | Purpose | Safety catch | Review workflow |
-| Display | Confirm dialog | Full diff view |
-| When | Specific patterns or all bash | Every write/edit |
+| Display | Yes/No + reason editor | Full diff view |
+| When | Specific patterns match | Every write/edit |
 | Default | On | Off |
 
-Both can run simultaneously. If both intercept a tool call, permission-gate fires first (=tool_call= handlers run in extension load order). If gate approves, slow-mode then shows its review.
+Both can run simultaneously. permission-gate fires first (earlier in =package.json= extension list).
 
 ** Status Bar
 
-| State | Display |
-|-----------+-----------------|
-| On | =gate:on= |
-| Off | _(empty)_ |
+| State | Display | Color |
+|-----------+-----------+-------|
+| On | = gate= | =dim= |
+| Off | _(empty)_ | |
+
+** Events
+
+| Event | When | Consumer |
+|------------------------------+----------------------------+---------------------|
+| =permission-gate:waiting= | Prompt shown to user | notify (desktop ping) |
+| =permission-gate:resolved= | User made yes/no decision | _(available for use)_ |
 
 ** Env Var
 
-=PI_NO_GATE=1= to disable at startup (for subagent sessions).
+=PI_NO_GATE=1= to disable at startup (for subagent sessions via chronoa).
 
 * Implementation Notes
 
-** Extension Load Order
+** Error Handling
 
-permission-gate should load before slow-mode so its =tool_call= handler fires first. In =package.json= =pi.extensions= array, list it before =slow-mode=.
-
-
-** Pattern Compilation
-
-Patterns in config are strings compiled to =RegExp= at load time. Invalid patterns are logged and skipped. Patterns are case-insensitive by default.
+- Invalid JSON in config file → warns user, uses empty config (defaults apply).
+- Invalid regex in a single rule → warns user, skips that rule, others still work.
+- All rules fail to compile → falls back to built-in defaults with a warning.
 
 ** Config Directory
 
-Follows the convention in =air/config-directory.org=. Config at =~/.config/pi-agent-extensions/permission-gate/rules.json=.
+Follows the convention in =.ref/config-dir.org=. Config at =~/.config/pi-agent-extensions/permission-gate/rules.json=.
