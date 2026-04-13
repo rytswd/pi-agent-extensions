@@ -19,6 +19,8 @@
 
 By default, pi's extension system enables all the extensions. Using ~pi config~ command, extensions can be disabled per user.
 
+See also [[https://github.com/rytswd/pi-agent-extensions-extra][pi-agent-extensions-extra]] for extensions that depend on external services or aren't universally applicable.
+
 ** 📦 Installation
 
 Choose one of the following methods:
