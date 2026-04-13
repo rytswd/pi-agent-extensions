@@ -1,0 +1,147 @@
+#+title: Permission Gate
+#+state: complete
+#+FILETAGS: :extension:feature:
+
+* Summary
+
+A configurable safety gate that intercepts tool calls and prompts for confirmation before executing potentially dangerous operations. Covers bash commands (destructive shell ops), and optionally write/edit calls (complementing slow-mode).
+
+Based on pi's built-in [[https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/examples/extensions/permission-gate.ts][permission-gate example]], extended with user-configurable rules and broader tool coverage.
+
+* Motivation
+
+The built-in example only blocks 3 bash patterns (=rm -rf=, =sudo=, =chmod 777=). Real-world use needs more patterns, the ability to customise them per project, and optionally gating bash commands in general (as requested in [[https://github.com/rytswd/pi-agent-extensions/issues/4][#4]]).
+
+slow-mode already gates write/edit, but permission-gate serves a different purpose: it's always-on protection against dangerous commands, not a review workflow. They complement each other.
+
+** Goals
+- Configurable pattern lists — users can add/remove rules without editing code.
+- Project-local overrides — different projects have different danger zones.
+- Bash gating mode — optionally require confirmation for ALL bash commands, not just pattern-matched ones (addresses [[https://github.com/rytswd/pi-agent-extensions/issues/4][#4]]).
+- Clear labels — show WHY a command was flagged ("force push", "recursive delete", "send email").
+- Status bar indicator — show gate state in statusline.
+- Toggle — =/gate= to enable/disable.
+- Non-interactive safety — block by default when no UI available (headless/print mode).
+
+** Non-Goals
+- Replacing slow-mode for write/edit review (slow-mode has diff display, external viewers, etc.).
+- Sandboxing or filesystem isolation.
+- Network-level blocking.
+
+* Proposal
+
+** Default Rules
+
+Dangerous bash patterns (from pi's example + Aldo's extended set + community suggestions):
+
+| Category | Pattern | Label |
+|----------+-------------------------------------------+-----------------------------|
+| Delete | =rm -rf=, =rm --recursive= | recursive delete |
+| Privilege | =sudo= | sudo |
+| Permissions | =chmod 777=, =chown 777= | world-writable permissions |
+| Device | => /dev/sd*= | raw device redirect |
+| Git destructive | =git push -f=, =git reset --hard= | force push, hard reset |
+| Git clean | =git clean -f= | git clean |
+| Git restore | =git checkout .=, =git restore= | discard changes |
+| Network exec | =curl \| sh=, =wget \| sh= | pipe to shell |
+| GitHub CLI | =gh pr create=, =gh issue create= | create PR/issue |
+| GitHub CLI | =gh pr merge=, =gh repo delete= | modify PR/repo |
+| jj destructive | =jj abandon=, =jj squash= | jj abandon/squash |
+
+** Configuration
+
+=~/.config/pi-agent-extensions/permission-gate/rules.json=:
+
+#+begin_src json
+{
+  "rules": [
+    { "pattern": "\\bgit\\s+push\\s+.*(-f|--force)", "label": "force push" },
+    { "pattern": "\\bsudo\\b", "label": "sudo" }
+  ],
+  "extraRules": [
+    { "pattern": "\\bdocker\\s+rm\\b", "label": "docker remove" }
+  ],
+  "disabledRules": ["sudo"]
+}
+#+end_src
+
+| Field | Description |
+|---------------+----------------------------------------------|
+| =rules= | Override the default rule set entirely |
+| =extraRules= | Add rules on top of defaults |
+| =disabledRules= | Disable specific default rules by label |
+
+Project-local overrides at =<cwd>/.pi/permission-gate.json= — merged on top of global config. This follows the consolidated config pattern: all extensions store config under =~/.config/pi/<name>/=. For example, a deploy project might add:
+
+#+begin_src json
+{
+  "extraRules": [
+    { "pattern": "\\bterraform\\s+destroy\\b", "label": "terraform destroy" },
+    { "pattern": "\\bkubectl\\s+delete\\b", "label": "kubectl delete" }
+  ]
+}
+#+end_src
+
+** Commands
+
+| Command | Description |
+|-----------------+---------------------------------------------|
+| =/gate= | Toggle on/off |
+| =/gate rules= | Show active rules |
+| =/gate add= | Add a rule interactively (pattern + label) |
+| =/gate remove= | Remove a rule by label |
+
+** Interaction Flow
+
+#+begin_example
+Agent calls bash: git push --force origin main
+
+  ⚠️ Dangerous command detected (force push):
+
+    git push --force origin main
+
+  Allow?
+  > Yes
+    No
+    Always (disable this rule for session)
+#+end_example
+
+The "Always" option disables the specific rule for the current session — useful when you're intentionally doing a series of force pushes.
+
+** Relationship to slow-mode
+
+| Feature | permission-gate | slow-mode |
+|---------+---------------------------------+---------------------------------|
+| Tools | bash (+ optionally write/edit) | write, edit only |
+| Purpose | Safety catch | Review workflow |
+| Display | Confirm dialog | Full diff view |
+| When | Specific patterns or all bash | Every write/edit |
+| Default | On | Off |
+
+Both can run simultaneously. If both intercept a tool call, permission-gate fires first (=tool_call= handlers run in extension load order). If gate approves, slow-mode then shows its review.
+
+** Status Bar
+
+| State | Display |
+|-----------+-----------------|
+| On | =gate:on= |
+| Off | _(empty)_ |
+
+** Env Var
+
+=PI_NO_GATE=1= to disable at startup (for subagent sessions).
+
+* Implementation Notes
+
+** Extension Load Order
+
+permission-gate should load before slow-mode so its =tool_call= handler fires first. In =package.json= =pi.extensions= array, list it before =slow-mode=.
+
+
+** Pattern Compilation
+
+Patterns in config are strings compiled to =RegExp= at load time. Invalid patterns are logged and skipped. Patterns are case-insensitive by default.
+
+** Config Directory
+
+Follows the convention in =air/config-directory.org=. Config at =~/.config/pi-agent-extensions/permission-gate/rules.json=.

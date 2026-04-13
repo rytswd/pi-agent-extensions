@@ -119,14 +119,14 @@ Extensions are auto-discovered from =~/.pi/agent/extensions/= — pi loads all =
 *Features*:
 - *Subscription usage*: Inline usage percentages for Anthropic (5h/Week/Extra) and Codex, with reset timer shown when usage exceeds 50%
 - *VCS*: Auto-detects jj (when =.jj/= exists) or git. Shows branch/bookmark/change-id with modified/added/removed counts
-- *Context window*: Current context usage percentage with colour warnings at 70% and 90%
+- *Context window*: Current context token count (default) or percentage, with colour warnings at 70% and 90%
 - *Shared cache*: Multiple pi instances share =~/.config/pi-statusline/cache.json= — only one instance fetches from the API per refresh interval
 - *Live OAuth token*: Uses pi's model registry for auto-refreshed tokens instead of reading stale =auth.json=
 
 *Status bar format*:
 
 #+begin_example
- Opus 4.6 ❯ 5h:4%│W:65% 1d22h ❯ 12%/1.0M ❯ think:med ❯ myproject ❯ ◆ main ~2 +3
+ Opus 4.6 ❯ 5h:4%│W:65% 1d22h ❯ 24k/1.0M ❯ think:med ❯ myproject ❯ ◆ main ~2 +3
 #+end_example
 
 Segments (left to right):
@@ -134,7 +134,7 @@ Segments (left to right):
 |-----------+----------------------+-----------------------------------------|
 | Model     | =Opus 4.6=           | Current model (stripped "Claude " prefix) |
 | Usage     | =5h:4%│W:65% 1d22h=  | Subscription usage, reset time when >50% |
-| Context   | =12%/1.0M=           | Context window usage (or =24k/1.0M= with =contextFormat: absolute=) |
+| Context   | =24k/1.0M=           | Context token count (default), or =12%/1.0M= with =/statusline context= |
 | Thinking  | =think:med=          | Thinking level (hidden when off)         |
 | Path      | =myproject=          | Current directory basename               |
 | VCS       | =◆ main ~2 +3=       | jj(◆)/git branch with file counts       |
@@ -145,10 +145,45 @@ Usage colours: dim when fine, yellow when >70% used, red when >90% used.
 *Commands*:
 | Command              | Action                 |
 |----------------------+------------------------|
-| =/statusline=        | Toggle on/off          |
-| =/statusline usage=  | Toggle usage display   |
-| =/statusline bar=    | Toggle entire bar      |
+| =/statusline=         | Toggle on/off                         |
+| =/statusline usage=   | Toggle usage display                  |
+| =/statusline bar=     | Toggle entire bar                     |
 | =/statusline context= | Toggle percent/absolute context tokens |
+| =/statusline refresh= | Force-refresh usage data              |
+
+#+html:</details>
+
+#+html:<details>
+#+html:<summary><strong>permission-gate</strong> - Configurable safety gate for dangerous commands</summary>
+#+html:<br>
+
+- *Source*: [[https://github.com/rytswd/pi-agent-extensions/tree/main/permission-gate][permission-gate/]]
+- *License*: MIT
+- *Toggle*: =/gate=
+- *Config*: =~/.config/pi-agent-extensions/permission-gate/rules.json=
+- *Based on*: pi's [[https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/examples/extensions/permission-gate.ts][built-in example]]
+
+*Description*: Intercepts bash commands matching dangerous patterns and prompts for confirmation before executing. Selecting "No" opens an inline editor to tell the assistant /why/ — the reason is fed back as the block message. Configurable rules with project-local overrides (addressing [[https://github.com/rytswd/pi-agent-extensions/issues/4][#4]]).
+
+*Features*:
+- *Default rules*: =rm -rf=, =sudo=, =git push -f=, =git reset --hard=, =curl|sh=, =gh repo/release=, and more
+- *Free-text rejection reason*: Tell the assistant why you blocked the command
+- *Configurable*: Add/remove rules via =/gate add= and =/gate rm=, or edit =rules.json= directly
+- *Project-local overrides*: =<cwd>/.pi/permission-gate.json= for project-specific rules
+- *Fallback safety*: If all user rules fail to compile, defaults are restored automatically
+
+*Commands*:
+| Command               | Action                                |
+|-----------------------+---------------------------------------|
+| =/gate=               | Toggle on/off                         |
+| =/gate list= (=ls=)   | Show active rules (grouped by source) |
+| =/gate add=           | Add a rule interactively              |
+| =/gate remove= (=rm=) | Remove a rule by label                |
+
+*Environment variables*:
+| Variable         | Description                          |
+|------------------+--------------------------------------|
+| =PI_NO_GATE=1=   | Disable the extension at startup      |
 
 #+html:</details>
 
@@ -158,25 +193,29 @@ Usage colours: dim when fine, yellow when >70% used, red when >90% used.
 
 - *Source*: [[https://github.com/rytswd/pi-agent-extensions/tree/main/stash][stash/]]
 - *License*: MIT
-- *Shortcut*: =Alt+S=
-- *Status indicator*: =📋 N= (stash count, shown in statusline)
+- *Shortcuts*: =Alt+S= (session), =Alt+Shift+S= (global)
+- *Status indicator*: = stash 3+= (session count + global indicator)
+- *Data*: =~/.local/share/pi-agent-extensions/stash/= (XDG data dir)
+- *Inspired by*: [[https://github.com/nicobailon/pi-powerline-footer][pi-powerline-footer]]'s editor stash feature
 
-*Description*: Stash your editor content to quickly type a different prompt, then restore it when done. Supports up to 9 separate stashes. Inspired by [[https://github.com/nicobailon/pi-powerline-footer][pi-powerline-footer]]'s editor stash feature.
+*Description*: Stash your editor content to quickly type a different prompt, then restore it when done. Two scopes: session stash (per-session, =Alt+S=) and global stash (shared across sessions, =Alt+Shift+S=). Both survive =/reload= and pi restarts.
 
-*Features*:
-- =Alt+S= with text: stashes and clears the editor
-- =Alt+S= with empty editor, 1 stash: restores immediately
-- =Alt+S= with empty editor, 2+ stashes: shows picker
-- Auto-restores most recent stash when the agent finishes (if editor is empty)
-- Stash indicator in statusline shows count
+*Session stash* (=Alt+S=):
+- With text: stashes and clears the editor
+- Empty editor, 1 stash: restores immediately
+- Empty editor, 2+ stashes: shows picker (Enter restore, x/d delete)
 
-*Picker key bindings* (2+ stashes):
-| Key     | Action          |
-|---------+-----------------|
-| =↑↓=    | Navigate        |
-| =Enter= | Restore selected |
-| =x= / =d= | Delete selected  |
-| =Esc=   | Cancel          |
+*Global stash* (=Alt+Shift+S=):
+- With text: pushes directly to global stash
+- Empty editor: shows picker with apply/pop/delete
+
+*Global stash picker*:
+| Key     | Action                          |
+|---------+---------------------------------|
+| =Enter= | Pop (move to editor, remove)    |
+| =a=     | Apply (copy to editor, keep)    |
+| =x= / =d= | Delete                       |
+| =Esc=   | Cancel                          |
 
 #+html:</details>
 
@@ -552,6 +591,7 @@ pi
 
 *** Try the Extensions
 
+- *permission-gate:* Enabled by default — =/gate= to toggle, =/gate rules= to see active rules
 - *stash:* Press =Alt+S= to stash editor text, =Alt+S= again to restore
 - *notify:* Desktop notification when agent finishes — =/notify= to toggle
 - *slow-mode:* Type =/slow-mode= to toggle the review gate
@@ -567,6 +607,7 @@ pi-agent-extensions/
 ├── statusline/         # Status bar with usage, VCS, context
 ├── stash/              # Editor text stash (Alt+S)
 ├── notify/             # Desktop notification on agent finish
+├── permission-gate/    # Safety gate for dangerous bash commands
 ├── slow-mode/          # Review gate for write/edit
 ├── fetch/              # HTTP request tool
 ├── questionnaire/      # Multi-question tool
