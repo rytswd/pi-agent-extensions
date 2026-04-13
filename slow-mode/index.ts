@@ -186,7 +186,7 @@ export default function slowMode(pi: ExtensionAPI) {
     // Show review UI — user decides to approve/reject
     // Emit event so other extensions can track when user approval is pending
     pi.events.emit("slow-mode:waiting");
-    const approved = await showReview(ctx, {
+    const result = await showReview(ctx, {
       operation: "WRITE",
       filePath: relPath,
       stagePath,
@@ -195,7 +195,7 @@ export default function slowMode(pi: ExtensionAPI) {
     });
     pi.events.emit("slow-mode:resolved");
 
-    if (approved) {
+    if (result === "approve") {
       // Read back the staged file in case user edited it
       try {
         const { readFileSync } = await import("node:fs");
@@ -217,7 +217,7 @@ export default function slowMode(pi: ExtensionAPI) {
     cleanup(stagePath);
 
     // Block the tool if user rejected
-    if (!approved) {
+    if (result !== "approve") {
       return { block: true, reason: "User rejected the write in slow mode review." };
     }
 
@@ -244,11 +244,19 @@ export default function slowMode(pi: ExtensionAPI) {
     ctx: ExtensionContext,
   ) {
     const filePath = input.path as string;
-    const oldText = input.oldText as string;
-    const newText = input.newText as string;
+    if (!filePath) return;
 
-    // Skip if input is malformed
-    if (!filePath || oldText == null || newText == null) return;
+    // Edit tool uses edits[] array — concatenate all changes for review
+    const edits = input.edits as Array<{ oldText: string; newText: string }> | undefined;
+    // Also support legacy top-level oldText/newText
+    const oldText = edits
+      ? edits.map((e) => e.oldText).join("\n")
+      : (input.oldText as string);
+    const newText = edits
+      ? edits.map((e) => e.newText).join("\n")
+      : (input.newText as string);
+
+    if (oldText == null || newText == null) return;
 
     const relPath = resolvePath(ctx, filePath);
 
@@ -282,11 +290,14 @@ export default function slowMode(pi: ExtensionAPI) {
       // Render diff through delta if available
       const renderedDiff = renderWithDelta(diff);
 
-      const decision = await showEditReview(ctx, {
+      const decision = await showReview(ctx, {
+        operation: "EDIT",
         filePath: relPath,
         body: renderedDiff,
+        stagePath: newPath,
         oldPath,
         newPath,
+        allowEdit: true,
       });
 
       switch (decision) {
@@ -338,24 +349,30 @@ export default function slowMode(pi: ExtensionAPI) {
   //------------------------------------------
 
   /**
+   * Result from the review UI: approve, reject, or edit (EDIT operations only)
+   */
+  type ReviewResult = "approve" | "reject" | "edit";
+
+  /**
    * Options for the review UI component
    */
   interface ReviewOptions {
     operation: "WRITE" | "EDIT";   // Type of change being reviewed
     filePath: string;               // Relative path to the file
-    stagePath: string;              // Path to staged file (for writes and as fallback)
     body: string;                   // Content to display (file content or diff)
+    stagePath?: string;             // Path to staged file (for writes and external editing)
     oldPath?: string;               // Staged old file (edits only)
     newPath?: string;               // Staged new file (edits only)
-    allowEdit?: boolean;            // Allow editing in external editor (default: false)
+    allowEdit?: boolean;            // Allow editing: Ctrl+E for EDIT ops, content reload for WRITE ops
   }
 
   /**
-   * Show interactive review UI
+   * Show interactive review UI for both write and edit operations.
    *
    * Displays the proposed change with scrollable preview and key bindings:
    * - Enter: approve change
    * - Esc: reject change
+   * - Ctrl+E: edit the new file in $VISUAL/$EDITOR (EDIT operations, when allowEdit is true)
    * - Ctrl+O: open in external viewer/editor (delta/vim/diff for edits, $EDITOR for writes)
    * - k/↑: scroll up one line
    * - j/↓: scroll down one line
@@ -364,23 +381,26 @@ export default function slowMode(pi: ExtensionAPI) {
    * - gg: go to top
    * - G: go to bottom
    *
-   * If allowEdit is true and user edits in external editor, the display is updated
-   * to show the modified content/diff.
+   * For WRITE operations with allowEdit, Ctrl+O opens the file in an editor and
+   * reloads the content afterward for continued review.
    *
-   * @returns Promise<boolean> - true if approved, false if rejected
+   * For EDIT operations with allowEdit, Ctrl+E returns "edit" so the caller can
+   * open the editor and regenerate the diff.
+   *
+   * @returns Promise<ReviewResult> - "approve", "reject", or "edit"
    */
   async function showReview(
     ctx: ExtensionContext,
     opts: ReviewOptions,
-  ): Promise<boolean> {
+  ): Promise<ReviewResult> {
     const { matchesKey, Key } = await import("@mariozechner/pi-tui");
 
-    return ctx.ui.custom<boolean>((tui, theme, _kb, done) => {
+    return ctx.ui.custom<ReviewResult>((tui, theme, _kb, done) => {
       // Scroll state
       let scrollOffset = 0;
       let cachedLines: string[] | undefined;
 
-      // Current body content (may be updated after external edit)
+      // Current body content (may be updated after external edit for WRITE ops)
       let currentBody = opts.body;
 
       // Content split into lines for scrolling
@@ -412,33 +432,24 @@ export default function slowMode(pi: ExtensionAPI) {
        * Open staged files in external viewer/editor
        * For edits: opens delta/vim diff
        * For writes: opens file in $VISUAL/$EDITOR
-       * 
-       * If allowEdit is true, reloads content after editing.
+       *
+       * For WRITE operations with allowEdit, reloads content after editing.
        */
       function openExternal() {
         try {
           if (opts.operation === "EDIT" && opts.oldPath && opts.newPath) {
             openExternalDiff(opts.oldPath, opts.newPath, opts.filePath);
-          } else {
+          } else if (opts.stagePath) {
             openExternalFile(opts.stagePath);
           }
-          
-          // If editing is allowed, reload and display the updated content
-          if (opts.allowEdit) {
+
+          // For WRITE operations with editing allowed, reload content after external edit
+          if (opts.allowEdit && opts.operation === "WRITE" && opts.stagePath) {
             try {
               const { readFileSync } = require("node:fs");
-              
-              if (opts.operation === "WRITE") {
-                // Reload the edited file content
-                const editedContent = readFileSync(opts.stagePath, "utf-8");
-                currentBody = editedContent;
-              } else if (opts.operation === "EDIT" && opts.oldPath && opts.newPath) {
-                // Reload the edited new file and regenerate diff
-                const editedOldText = readFileSync(opts.oldPath, "utf-8");
-                const editedNewText = readFileSync(opts.newPath, "utf-8");
-                currentBody = generateUnifiedDiff(opts.filePath, editedOldText, editedNewText);
-              }
-              
+              const editedContent = readFileSync(opts.stagePath, "utf-8");
+              currentBody = editedContent;
+
               // Update bodyLines and scroll bounds
               bodyLines = currentBody.split("\n");
               maxScroll = Math.max(0, bodyLines.length - 5);
@@ -460,13 +471,19 @@ export default function slowMode(pi: ExtensionAPI) {
       function handleInput(data: string) {
         // Approve change
         if (matchesKey(data, Key.enter)) {
-          done(true);
+          done("approve");
           return;
         }
 
         // Reject change
         if (matchesKey(data, Key.escape)) {
-          done(false);
+          done("reject");
+          return;
+        }
+
+        // Edit: open just the new file in the user's editor (EDIT operations only)
+        if (opts.allowEdit && opts.operation === "EDIT" && matchesKey(data, Key.ctrl("e"))) {
+          done("edit");
           return;
         }
 
@@ -555,11 +572,13 @@ export default function slowMode(pi: ExtensionAPI) {
           scrollOffset,
           scrollOffset + maxVisible,
         );
-        
+
         // Check if the diff contains ANSI escape codes (from delta)
         const hasAnsiCodes = opts.operation === "EDIT" && /\x1b\[[0-9;]*m/.test(opts.body);
-        
-        for (const line of visible) {
+
+        for (const rawLine of visible) {
+          // Expand tabs to 4 spaces for consistent rendering
+          const line = rawLine.replace(/\t/g, "    ");
           if (opts.operation === "EDIT" && hasAnsiCodes) {
             // Delta has already colorized the diff, preserve ANSI codes
             add(` ${line}`);
@@ -601,11 +620,17 @@ export default function slowMode(pi: ExtensionAPI) {
 
         lines.push("");
 
-        // Key binding hints
-        const ctrlOHint = opts.allowEdit ? "Ctrl+O edit externally" : "Ctrl+O view externally";
-        add(
-          theme.fg("dim", ` Enter approve • Esc reject • ${ctrlOHint} • j/k u/d gg/G scroll`),
-        );
+        // Key binding hints — differ based on operation type
+        let hints = "Enter approve • Esc reject";
+        if (opts.allowEdit && opts.operation === "EDIT") {
+          hints += " • Ctrl+E edit • Ctrl+O view diff";
+        } else if (opts.allowEdit) {
+          hints += " • Ctrl+O edit externally";
+        } else {
+          hints += " • Ctrl+O view externally";
+        }
+        hints += " • j/k u/d gg/G scroll";
+        add(theme.fg("dim", ` ${hints}`));
 
         // Bottom separator
         add(theme.fg("accent", "─".repeat(width)));
@@ -621,191 +646,6 @@ export default function slowMode(pi: ExtensionAPI) {
         invalidate: () => {
           cachedLines = undefined;
         },
-        handleInput,
-      };
-    });
-  }
-
-  /**
-   * Options for the edit review UI (diff-specific)
-   */
-  interface EditReviewOptions {
-    filePath: string;               // Relative path to the file
-    body: string;                   // Unified diff content to display
-    oldPath: string;                // Staged old file
-    newPath: string;                // Staged new file
-  }
-
-  /**
-   * Show interactive review UI for edit operations.
-   *
-   * Like showReview, but returns a three-way decision:
-   * - "approve": apply the change
-   * - "reject": block the change
-   * - "edit": open the new file in an editor (caller should loop)
-   *
-   * Key bindings:
-   * - Enter: approve
-   * - Esc: reject
-   * - Ctrl+E: edit the new file in $VISUAL/$EDITOR
-   * - Ctrl+O: view diff in external viewer (delta/vim/diff)
-   * - j/k/u/d/gg/G: scroll
-   */
-  async function showEditReview(
-    ctx: ExtensionContext,
-    opts: EditReviewOptions,
-  ): Promise<"approve" | "reject" | "edit"> {
-    const { matchesKey, Key } = await import("@mariozechner/pi-tui");
-
-    return ctx.ui.custom<"approve" | "reject" | "edit">((tui, theme, _kb, done) => {
-      // Scroll state
-      let scrollOffset = 0;
-      let cachedLines: string[] | undefined;
-
-      // Content split into lines for scrolling
-      const bodyLines = opts.body.split("\n");
-      const maxVisible = 30;
-      let maxScroll = Math.max(0, bodyLines.length - 5);
-
-      // Track last 'g' press for gg binding
-      let lastGPress = 0;
-
-      function clampScroll(offset: number) {
-        scrollOffset = Math.max(0, Math.min(maxScroll, offset));
-      }
-
-      function refresh() {
-        cachedLines = undefined;
-        tui.requestRender();
-      }
-
-      function handleInput(data: string) {
-        // Approve
-        if (matchesKey(data, Key.enter)) {
-          done("approve");
-          return;
-        }
-
-        // Reject
-        if (matchesKey(data, Key.escape)) {
-          done("reject");
-          return;
-        }
-
-        // Edit: open just the new file in the user's editor
-        if (matchesKey(data, Key.ctrl("e"))) {
-          done("edit");
-          return;
-        }
-
-        // View diff externally (read-only)
-        if (matchesKey(data, Key.ctrl("o"))) {
-          try {
-            openExternalDiff(opts.oldPath, opts.newPath, opts.filePath);
-          } catch {
-            // External viewer failed — stay in inline review
-          }
-          refresh();
-          return;
-        }
-
-        // Vim-style navigation
-        if (data === "k" || matchesKey(data, Key.up)) {
-          clampScroll(scrollOffset - 1);
-          refresh();
-          return;
-        }
-        if (data === "j" || matchesKey(data, Key.down)) {
-          clampScroll(scrollOffset + 1);
-          refresh();
-          return;
-        }
-        if (data === "u" || matchesKey(data, Key.pageUp)) {
-          clampScroll(scrollOffset - 15);
-          refresh();
-          return;
-        }
-        if (data === "d" || matchesKey(data, Key.pageDown)) {
-          clampScroll(scrollOffset + 15);
-          refresh();
-          return;
-        }
-        if (data === "g") {
-          const now = Date.now();
-          if (now - lastGPress < 500) {
-            scrollOffset = 0;
-            refresh();
-            lastGPress = 0;
-          } else {
-            lastGPress = now;
-          }
-          return;
-        }
-        if (data === "G") {
-          scrollOffset = maxScroll;
-          refresh();
-          return;
-        }
-      }
-
-      function render(width: number): string[] {
-        if (cachedLines) return cachedLines;
-
-        const lines: string[] = [];
-        const add = (s: string) => lines.push(truncateToWidth(s, width));
-
-        add(theme.fg("accent", "─".repeat(width)));
-        add(theme.fg("accent", " EDIT (diff)"));
-        add(` ${theme.fg("accent", opts.filePath)}`);
-        lines.push("");
-
-        // Scrollable diff window with syntax highlighting
-        const visible = bodyLines.slice(scrollOffset, scrollOffset + maxVisible);
-        
-        // Check if the diff contains ANSI escape codes (from delta)
-        const hasAnsiCodes = /\x1b\[[0-9;]*m/.test(opts.body);
-        
-        for (const line of visible) {
-          if (hasAnsiCodes) {
-            // Delta has already colorized the diff, preserve ANSI codes
-            add(` ${line}`);
-          } else {
-            // Fallback: Manual syntax highlighting for unified diff format
-            if (line.startsWith("---") || line.startsWith("+++")) {
-              add(` ${theme.fg("dim", line)}`);
-            } else if (line.startsWith("@@")) {
-              add(` ${theme.fg("accent", line)}`);
-            } else if (line.startsWith("+")) {
-              add(` ${theme.fg("success", line)}`);
-            } else if (line.startsWith("-")) {
-              add(` ${theme.fg("error", line)}`);
-            } else {
-              add(` ${theme.fg("text", line)}`);
-            }
-          }
-        }
-
-        if (bodyLines.length > maxVisible) {
-          const total = bodyLines.length;
-          const end = Math.min(scrollOffset + maxVisible, total);
-          add(
-            theme.fg("dim", ` (lines ${scrollOffset + 1}–${end} of ${total} — ↑↓/PgUp/PgDn to scroll)`),
-          );
-        }
-
-        lines.push("");
-        add(
-          theme.fg("dim", ` Enter approve • Esc reject • Ctrl+E edit • Ctrl+O view diff • j/k u/d gg/G scroll`),
-        );
-        add(theme.fg("accent", "─".repeat(width)));
-
-        cachedLines = lines;
-        return lines;
-      }
-
-      return {
-        render,
-        invalidate: () => { cachedLines = undefined; },
         handleInput,
       };
     });
@@ -960,7 +800,7 @@ export default function slowMode(pi: ExtensionAPI) {
     const tmpFile = join(tmp, "diff.patch");
     try {
       writeFileSync(tmpFile, unifiedDiff, "utf-8");
-      const result = execSync(`delta --no-gitconfig --color-only < "${tmpFile}"`, {
+      const result = execSync(`delta --no-gitconfig --color-only --tabs 4 < "${tmpFile}"`, {
         encoding: "utf-8",
         stdio: ["pipe", "pipe", "pipe"],
         timeout: 5000,
