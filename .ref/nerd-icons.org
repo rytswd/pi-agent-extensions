@@ -1,0 +1,40 @@
+#+title: Nerd Font Icon Convention
+#+FILETAGS: :reference:convention:
+
+* Overview
+
+Extensions use Nerd Font icons with emoji fallbacks. Detection is best-effort via environment variables and terminal identification.
+
+* Detection
+
+#+begin_src typescript
+function hasNerdFont(): boolean {
+    if (process.env.NERD_FONTS === "1" || process.env.POWERLINE_NERD_FONTS === "1") return true;
+    if (process.env.NERD_FONTS === "0") return false;
+    // Terminals that commonly ship with / default to Nerd Fonts
+    const term = process.env.TERM_PROGRAM?.toLowerCase() ?? "";
+    return /ghostty|wezterm|kitty|alacritty/.test(term);
+}
+#+end_src
+
+Override: =NERD_FONTS=1= to force, =NERD_FONTS=0= to disable.
+
+* Icon Table
+
+| Extension | Nerd Font | Fallback | Color | Meaning |
+|-----------+-----------+----------+-------+---------|
+| slow-mode | = \uf256= | =✋= | =warning= | hand / human approval |
+| permission-gate | = \uf132= | =🛡= | =dim= | shield / safety |
+| stash | = \uf187= | =📦= | =success= | archive / save |
+| notify:off | = \uf1f6= | =🔕= | =warning= | bell-slash |
+| telegram | = \uf2c6= | =✈= | =dim= | telegram |
+
+* Usage Pattern
+
+Each extension inlines the check and picks the icon at load time:
+
+#+begin_src typescript
+const nerd = hasNerdFont();
+const ICON = nerd ? "\uf256" : "✋";
+// Then use: ctx.ui.setStatus("slow-mode", theme.fg("warning", `${ICON} slow`));
+#+end_src

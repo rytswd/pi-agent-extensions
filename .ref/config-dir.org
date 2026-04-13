@@ -55,9 +55,11 @@ import { homedir } from "node:os";
 | Extension | Config files | Notes |
 |-----------+---------------------------------------+------------------------------|
 | statusline | =settings.json=, =cache.json=, =cache.lock= | Settings + shared usage cache |
-| permission-gate | =rules.json= | User-defined rules (planned) |
+| permission-gate | =rules.json= | User-defined rules |
 
-Extensions that don't need persistent config (stash, notify, slow-mode, fetch, direnv, questionnaire) don't use this.
+Extensions that don't need persistent config (notify, slow-mode, fetch, direnv, questionnaire) don't use this.
+
+*Note:* stash uses =~/.local/share/pi-agent-extensions/stash/= (XDG data dir, not config dir) since stashes are user data, not configuration.
 
 * Project-Local Config
 
@@ -65,4 +67,4 @@ Per-project overrides remain at =<cwd>/.pi/<extension-name>.json= — not affect
 
 * Extra Repo
 
-=pi-agent-extensions-extra= follows the same pattern with its own namespace: =~/.config/pi-agent-extensions-extra/<name>/=, overridable via =~/.pi/agent/pi-agent-extensions-extra.json=.
+=pi-agent-extensions-extra= uses the same namespace (=~/.config/pi-agent-extensions/<name>/=) and the same override file (=~/.pi/agent/pi-agent-extensions.json=). Extensions from both repos coexist under one directory.
