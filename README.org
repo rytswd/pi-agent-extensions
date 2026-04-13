@@ -90,11 +90,16 @@ cp -r /path/to/pi-agent-extensions/direnv ~/.pi/agent/extensions/
 cp -r /path/to/pi-agent-extensions/questionnaire ~/.pi/agent/extensions/
 #+end_src
 
-Or clone directly to the extensions directory:
+Or download a single extension directly (no git clone needed):
 
 #+begin_src bash
-git clone https://github.com/rytswd/pi-agent-extensions.git ~/.pi/agent/extensions/pi-agent-extensions
+# Download just one extension via curl + tar
+curl -fsSL https://github.com/rytswd/pi-agent-extensions/archive/main.tar.gz | \
+  tar xz --strip-components=2 -C ~/.pi/agent/extensions/ \
+  pi-agent-extensions-main/notify
 #+end_src
+
+Replace =notify= with any extension name (=statusline=, =stash=, =permission-gate=, etc.).
 
 *Note:* If an extension has dependencies (e.g., =slow-mode= requires the =diff= package), you'll need to install them:
 
