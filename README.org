@@ -79,6 +79,8 @@ This setup enables all of the extensions.
 #+html:<summary><b>Method 3: Copy Individual Extensions</b></summary>
 #+html:<br>
 
+Each extension is fully self-contained in its own directory — no shared code or cross-extension imports. Just copy the directory and it works.
+
 For selective installation, copy specific extension directories to =~/.pi/agent/extensions/=:
 
 #+begin_src bash

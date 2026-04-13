@@ -12,7 +12,7 @@ No build step, no bundler, no tsconfig required. Just write `.ts` files.
 
 ## Extension Location
 
-Extensions live in `~/.pi/agent/extensions/` for global auto-discovery.
+Extensions live in `~/.pi/agent/extensions/` for global auto-discovery. Each extension is fully self-contained in its own directory — no shared code between extensions. Any directory can be copied individually and it works standalone.
 
 ```
 ~/.pi/agent/extensions/

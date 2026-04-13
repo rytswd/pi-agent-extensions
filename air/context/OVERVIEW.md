@@ -6,7 +6,8 @@
 
 ## Core Principles
 
-- **Drop-in simplicity** — Each extension is a single `.ts` file (or a directory with `index.ts`) that pi auto-discovers
+- **Self-contained** — Each extension directory is fully standalone — no shared code or cross-extension imports. Copy any directory to `~/.pi/agent/extensions/` and it works
+- **Drop-in simplicity** — Each extension is a directory with `index.ts` that pi auto-discovers
 - **Non-intrusive** — Extensions observe and enhance pi's behaviour without disrupting core functionality
 - **Composable** — Extensions are independent; add or remove any without affecting others
 - **Community-driven** — Built on ideas and contributions from the pi community

@@ -6,9 +6,12 @@ This project is a flat collection of pi extensions — there is no complex archi
 
 ## Design Principles
 
-### Single-File Extensions
-- Each extension is one `.ts` file (or a directory with `index.ts` for multi-file cases)
-- No shared state between extensions
+### Self-Contained Extensions
+- Each extension is fully self-contained in its own directory — no shared code or cross-extension imports
+- Any extension directory can be copied standalone to `~/.pi/agent/extensions/` and it works
+- Multi-file extensions (e.g. statusline) keep all source under their directory (e.g. `statusline/src/`)
+- Common patterns (e.g. config directory resolution) are inlined per extension, documented in `.ref/`
+- No shared state between extensions at the code level (they communicate via pi's event bus)
 - No build step required — pi uses jiti for on-the-fly TypeScript loading
 
 ### Event-Driven
