@@ -20,7 +20,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { homedir } from "node:os";
-import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, BashToolCallEvent } from "@mariozechner/pi-coding-agent";
 import { Editor, type EditorTheme, Key, matchesKey, truncateToWidth } from "@mariozechner/pi-tui";
 
 // ── Types ────────────────────────────────────────────────────────────────
@@ -149,8 +149,17 @@ async function showReviewPrompt(
 	ctx: ExtensionContext,
 	command: string,
 	labels: string,
+	events?: { on: (name: string, handler: (payload: any) => void) => any },
 ): Promise<GateResult> {
 	return ctx.ui.custom<GateResult>((tui, theme, _kb, done) => {
+		// Listen for external approval (e.g. Telegram button tap)
+		if (events) {
+			events.on("permission-gate:respond", (payload: any) => {
+				const allow = payload?.allow === true;
+				const reason = allow ? "" : (payload?.reason ?? `Blocked remotely (${labels})`);
+				done(allow ? { allow: true } : { allow: false, reason });
+			});
+		}
 		let optionIndex = 0;
 		let inputMode = false;
 		let cachedLines: string[] | undefined;
@@ -276,7 +285,7 @@ export default function permissionGate(pi: ExtensionAPI) {
 	pi.on("tool_call", async (event, ctx) => {
 		if (!enabled || event.toolName !== "bash") return undefined;
 
-		const command = (event.input as any).command as string;
+		const command = (event as BashToolCallEvent).input.command;
 		if (!command) return undefined;
 
 		const matched = rules.filter((r) => r.pattern.test(command));
@@ -288,8 +297,12 @@ export default function permissionGate(pi: ExtensionAPI) {
 			return { block: true, reason: `Dangerous command blocked (${labels}) — no UI` };
 		}
 
-		pi.events.emit("permission-gate:waiting");
-		const result = await showReviewPrompt(ctx, command, labels);
+		pi.events.emit("permission-gate:waiting", { command, labels });
+
+		// TUI prompt also listens for permission-gate:respond events,
+		// so external callers (e.g. Telegram) can dismiss it via the event bus.
+		const result = await showReviewPrompt(ctx, command, labels, pi.events);
+
 		pi.events.emit("permission-gate:resolved");
 
 		return result.allow ? undefined : { block: true, reason: result.reason };
