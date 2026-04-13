@@ -557,22 +557,6 @@ pi
 - *direnv:* Watch the status bar — it loads automatically if you have =.envrc= files
 - *statusline:* Appears automatically below the editor — type =/statusline= to toggle
 
-** 📁 Structure
-
-#+begin_example
-pi-agent-extensions/
-├── statusline/         # Status bar with usage, VCS, context
-├── stash/              # Editor text stash (Alt+S)
-├── notify/             # Desktop notification on agent finish
-├── permission-gate/    # Safety gate for dangerous bash commands
-├── slow-mode/          # Review gate for write/edit
-├── fetch/              # HTTP request tool
-├── questionnaire/      # Multi-question tool
-├── direnv/             # Direnv integration
-├── package.json
-└── README.org
-#+end_example
-
 ** 🔧 Adding New Extensions
 
 To add a new extension, create a directory with an =index.ts= file. pi auto-discovers =*.ts= files and =index.ts= files in subdirectories.
