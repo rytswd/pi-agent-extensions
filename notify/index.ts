@@ -97,6 +97,16 @@ export default function notify(pi: ExtensionAPI) {
 		},
 	});
 
+	// ── Permission gate events ───────────────────────────────────────
+
+	pi.events.on("permission-gate:waiting", () => {
+		if (!enabled) return;
+		// The gate UI blocks the agent — notify so the user knows
+		// a dangerous command needs approval (they may have switched away)
+		const project = basename(process.cwd());
+		sendNotification(`Pi · ${project}`, "⚠️ Dangerous command — needs approval");
+	});
+
 	pi.on("agent_start", async () => {
 		agentStartTime = Date.now();
 		turnCount = 0;
