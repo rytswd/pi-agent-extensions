@@ -1,30 +1,66 @@
 /**
- * VCS status detection — supports both git and jj.
+ * VCS status detection for git and jj.
  *
- * jj is preferred when a .jj directory exists because it is the
- * higher-level VCS; jj repos always colocate a .git directory but
- * the reverse is not true.
+ * jj is preferred over git: jj repos colocate a .git directory but
+ * not vice versa.
+ *
+ * Repo kind and binary availability are cached. Status fetched lazily
+ * on first request and refetched only after invalidateVcs().
  */
 
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { VcsKind, VcsStatus } from "./types.js";
 
-// ── Cache ────────────────────────────────────────────────────────────────
+const binAvailable: Partial<Record<VcsKind, boolean>> = {};
 
-const CACHE_TTL_MS = 1000;
+function hasBinary(name: VcsKind): boolean {
+	const cached = binAvailable[name];
+	if (cached !== undefined) return cached;
+	const r = spawnSync(name, ["--version"], { stdio: "ignore" });
+	const ok = !r.error || (r.error as NodeJS.ErrnoException).code !== "ENOENT";
+	binAvailable[name] = ok;
+	return ok;
+}
 
-let cachedStatus: (VcsStatus & { ts: number }) | null = null;
-let pending: Promise<VcsStatus | null> | null = null;
-let invalidationSeq = 0;
+const kindByCwd = new Map<string, VcsKind | null>();
+
+function detectKind(cwd: string): VcsKind | null {
+	if (kindByCwd.has(cwd)) return kindByCwd.get(cwd)!;
+	let kind: VcsKind | null = null;
+	// Walk up to find a repo root. jj repos colocate .git so check .jj first.
+	let dir = cwd;
+	while (true) {
+		if (existsSync(join(dir, ".jj")) && hasBinary("jj")) {
+			kind = "jj";
+			break;
+		}
+		if (existsSync(join(dir, ".git")) && hasBinary("git")) {
+			kind = "git";
+			break;
+		}
+		const parent = dirname(dir);
+		if (parent === dir) break;
+		dir = parent;
+	}
+	kindByCwd.set(cwd, kind);
+	return kind;
+}
+
+let cachedStatus: VcsStatus | null = null;
+let inflight = false;
+let seq = 0;
+let onUpdate: (() => void) | null = null;
+
+export function setVcsUpdateCallback(cb: (() => void) | null): void {
+	onUpdate = cb;
+}
 
 export function invalidateVcs(): void {
 	cachedStatus = null;
-	invalidationSeq++;
+	seq++;
 }
-
-// ── Helpers ──────────────────────────────────────────────────────────────
 
 function run(cmd: string, args: string[], timeoutMs = 300): Promise<string | null> {
 	return new Promise((resolve) => {
@@ -50,7 +86,6 @@ function run(cmd: string, args: string[], timeoutMs = 300): Promise<string | nul
 // ── jj ───────────────────────────────────────────────────────────────────
 
 async function fetchJj(): Promise<VcsStatus | null> {
-	// Get the current change-id (short) + description + bookmarks
 	const logLine = await run("jj", [
 		"log",
 		"--no-graph",
@@ -62,11 +97,9 @@ async function fetchJj(): Promise<VcsStatus | null> {
 	if (logLine === null) return null;
 
 	const [changeId, bookmarksStr, _desc] = logLine.split("\0");
-	// Use first bookmark if available, otherwise the short change-id
 	const bookmarks = (bookmarksStr ?? "").split(",").filter(Boolean);
 	const head = bookmarks[0] ?? changeId ?? null;
 
-	// Get file change counts from jj status
 	const status = await run("jj", ["diff", "--summary"], 500);
 	let modified = 0;
 	let added = 0;
@@ -118,15 +151,6 @@ async function fetchGit(): Promise<VcsStatus | null> {
 	return { kind: "git", head, modified, added, removed };
 }
 
-// ── Detect & dispatch ────────────────────────────────────────────────────
-
-function detectKind(cwd: string): VcsKind | null {
-	// jj repos colocate .git so check .jj first
-	if (existsSync(join(cwd, ".jj"))) return "jj";
-	if (existsSync(join(cwd, ".git"))) return "git";
-	return null;
-}
-
 async function fetchVcsStatus(cwd: string): Promise<VcsStatus | null> {
 	const kind = detectKind(cwd);
 	if (!kind) return null;
@@ -134,25 +158,20 @@ async function fetchVcsStatus(cwd: string): Promise<VcsStatus | null> {
 }
 
 /**
- * Get VCS status. Returns cached value immediately, refreshes in background
- * when stale. Designed for synchronous render() calls.
+ * Get cached VCS status. Triggers a fetch only on first call or after
+ * invalidateVcs(). Renders never block — they read whatever is cached.
  */
 export function getVcsStatus(cwd: string): VcsStatus | null {
-	const now = Date.now();
-	if (cachedStatus && now - cachedStatus.ts < CACHE_TTL_MS) {
-		return cachedStatus;
-	}
-
-	if (!pending) {
-		const seq = invalidationSeq;
-		pending = fetchVcsStatus(cwd).then((result) => {
-			if (seq === invalidationSeq) {
-				cachedStatus = result ? { ...result, ts: Date.now() } : null;
-			}
-			pending = null;
-			return result;
+	if (detectKind(cwd) === null) return null;
+	if (cachedStatus === null && !inflight) {
+		inflight = true;
+		const mySeq = seq;
+		void fetchVcsStatus(cwd).then((result) => {
+			inflight = false;
+			if (mySeq !== seq) return;
+			cachedStatus = result;
+			onUpdate?.();
 		});
 	}
-
 	return cachedStatus;
 }
