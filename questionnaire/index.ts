@@ -14,7 +14,7 @@ import {
   Text,
   truncateToWidth,
 } from "@mariozechner/pi-tui";
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 
 // Types
 interface QuestionOption {
@@ -31,6 +31,7 @@ interface Question {
   prompt: string;
   options: QuestionOption[];
   allowOther: boolean;
+  multiple: boolean;
 }
 
 interface Answer {
@@ -39,6 +40,11 @@ interface Answer {
   label: string;
   wasCustom: boolean;
   index?: number;
+  // Populated for multiple-choice questions
+  values?: string[];
+  labels?: string[];
+  indices?: number[];
+  customText?: string;
 }
 
 interface QuestionnaireResult {
@@ -71,6 +77,12 @@ const QuestionSchema = Type.Object({
   allowOther: Type.Optional(
     Type.Boolean({
       description: "Allow 'Type something' option (default: true)",
+    }),
+  ),
+  multiple: Type.Optional(
+    Type.Boolean({
+      description:
+        "Allow selecting multiple options (checkbox style). Space toggles, Enter confirms. Default: false",
     }),
   ),
 });
@@ -108,12 +120,21 @@ export default function questionnaire(pi: ExtensionAPI) {
       if (params.questions.length === 0) {
         return errorResult("Error: No questions provided");
       }
+      const badQ = params.questions.find(
+        (q) => q.options.length === 0 && q.allowOther === false,
+      );
+      if (badQ) {
+        return errorResult(
+          `Error: Question '${badQ.id}' has no options and allowOther is false`,
+        );
+      }
 
       // Normalize questions with defaults
       const questions: Question[] = params.questions.map((q, i) => ({
         ...q,
         label: q.label || `Q${i + 1}`,
         allowOther: q.allowOther !== false,
+        multiple: q.multiple === true,
       }));
 
       const isMulti = questions.length > 1;
@@ -127,7 +148,11 @@ export default function questionnaire(pi: ExtensionAPI) {
           let inputMode = false;
           let inputQuestionId: string | null = null;
           let cachedLines: string[] | undefined;
+          let cachedWidth = -1;
           const answers = new Map<string, Answer>();
+          // Multi-select state: checked option indices and optional custom text per question
+          const multiChecked = new Map<string, Set<number>>();
+          const multiCustom = new Map<string, string>();
 
           // Editor for "Type something" option
           const editorTheme: EditorTheme = {
@@ -149,29 +174,28 @@ export default function questionnaire(pi: ExtensionAPI) {
           }
 
           function submit(cancelled: boolean) {
-            done({
-              questions,
-              answers: Array.from(answers.values()),
-              cancelled,
-            });
+            // Emit answers in question order so consumers get a stable layout
+            // regardless of the order the user filled tabs.
+            const ordered = questions
+              .map((q) => answers.get(q.id))
+              .filter((a): a is Answer => a !== undefined);
+            done({ questions, answers: ordered, cancelled });
           }
 
           function currentQuestion(): Question | undefined {
             return questions[currentTab];
           }
 
+          const OTHER: RenderOption = {
+            value: "__other__",
+            label: "Type something.",
+            isOther: true,
+          };
+
           function currentOptions(): RenderOption[] {
             const q = currentQuestion();
             if (!q) return [];
-            const opts: RenderOption[] = [...q.options];
-            if (q.allowOther) {
-              opts.push({
-                value: "__other__",
-                label: "Type something.",
-                isOther: true,
-              });
-            }
-            return opts;
+            return q.allowOther ? [...q.options, OTHER] : [...q.options];
           }
 
           function allAnswered(): boolean {
@@ -192,30 +216,65 @@ export default function questionnaire(pi: ExtensionAPI) {
             refresh();
           }
 
-          function saveAnswer(
-            questionId: string,
-            value: string,
-            label: string,
-            wasCustom: boolean,
-            index?: number,
-          ) {
-            answers.set(questionId, {
-              id: questionId,
-              value,
-              label,
-              wasCustom,
-              index,
+          function enterInputMode(q: Question) {
+            inputMode = true;
+            inputQuestionId = q.id;
+            editor.setText(q.multiple ? multiCustom.get(q.id) ?? "" : "");
+            refresh();
+          }
+
+          function checkedFor(q: Question): Set<number> {
+            let s = multiChecked.get(q.id);
+            if (!s) {
+              s = new Set();
+              multiChecked.set(q.id, s);
+            }
+            return s;
+          }
+
+          function commitMultiAnswer(q: Question) {
+            const checked = checkedFor(q);
+            const indices = [...checked].sort((a, b) => a - b);
+            const values = indices.map((i) => q.options[i].value);
+            const labels = indices.map((i) => q.options[i].label);
+            const custom = multiCustom.get(q.id);
+            if (custom) {
+              values.push(custom);
+              labels.push(custom);
+            }
+            if (values.length === 0) {
+              answers.delete(q.id);
+              return;
+            }
+            answers.set(q.id, {
+              id: q.id,
+              value: values.join(", "),
+              label: labels.join(", "),
+              wasCustom: !!custom && indices.length === 0,
+              values,
+              labels,
+              indices: indices.map((i) => i + 1),
+              customText: custom,
             });
           }
 
           // Editor submit callback
           editor.onSubmit = (value) => {
-            if (!inputQuestionId) return;
-            const trimmed = value.trim() || "(no response)";
-            saveAnswer(inputQuestionId, trimmed, trimmed, true);
+            const qid = inputQuestionId;
+            if (!qid) return;
+            const q = questions.find((x) => x.id === qid);
+            const trimmed = value.trim();
             inputMode = false;
             inputQuestionId = null;
             editor.setText("");
+            if (q?.multiple) {
+              trimmed ? multiCustom.set(qid, trimmed) : multiCustom.delete(qid);
+              commitMultiAnswer(q);
+              refresh();
+              return;
+            }
+            const text = trimmed || "(no response)";
+            answers.set(qid, { id: qid, value: text, label: text, wasCustom: true });
             advanceAfterAnswer();
           };
 
@@ -265,6 +324,20 @@ export default function questionnaire(pi: ExtensionAPI) {
               return;
             }
 
+            // Multi-select: Space toggles current option
+            if (q?.multiple && matchesKey(data, Key.space)) {
+              const opt = opts[optionIndex];
+              if (!opt) return;
+              if (opt.isOther) return enterInputMode(q);
+              const checked = checkedFor(q);
+              checked.has(optionIndex)
+                ? checked.delete(optionIndex)
+                : checked.add(optionIndex);
+              commitMultiAnswer(q);
+              refresh();
+              return;
+            }
+
             // Option navigation
             if (matchesKey(data, Key.up)) {
               optionIndex = Math.max(0, optionIndex - 1);
@@ -277,17 +350,31 @@ export default function questionnaire(pi: ExtensionAPI) {
               return;
             }
 
-            // Select option
+            // Select option / confirm
             if (matchesKey(data, Key.enter) && q) {
               const opt = opts[optionIndex];
-              if (opt.isOther) {
-                inputMode = true;
-                inputQuestionId = q.id;
-                editor.setText("");
-                refresh();
+              if (q.multiple) {
+                // Enter confirms current selection. If nothing checked yet,
+                // act on the cursor item so a bare Enter still does something
+                // useful (and avoids a soft-lock when the only option is "Other").
+                const checked = checkedFor(q);
+                if (checked.size === 0 && !multiCustom.get(q.id) && opt) {
+                  if (opt.isOther) return enterInputMode(q);
+                  checked.add(optionIndex);
+                }
+                commitMultiAnswer(q);
+                answers.has(q.id) ? advanceAfterAnswer() : refresh();
                 return;
               }
-              saveAnswer(q.id, opt.value, opt.label, false, optionIndex + 1);
+              if (!opt) return;
+              if (opt.isOther) return enterInputMode(q);
+              answers.set(q.id, {
+                id: q.id,
+                value: opt.value,
+                label: opt.label,
+                wasCustom: false,
+                index: optionIndex + 1,
+              });
               advanceAfterAnswer();
               return;
             }
@@ -299,7 +386,8 @@ export default function questionnaire(pi: ExtensionAPI) {
           }
 
           function render(width: number): string[] {
-            if (cachedLines) return cachedLines;
+            if (cachedLines && cachedWidth === width) return cachedLines;
+            cachedWidth = width;
 
             const lines: string[] = [];
             const q = currentQuestion();
@@ -337,24 +425,30 @@ export default function questionnaire(pi: ExtensionAPI) {
             }
 
             // Helper to render options list
-            function renderOptions() {
-              for (let i = 0; i < opts.length; i++) {
-                const opt = opts[i];
+            const renderOptions = () => {
+              if (!q) return;
+              const checked = q.multiple ? checkedFor(q) : undefined;
+              const custom = multiCustom.get(q.id);
+              opts.forEach((opt, i) => {
                 const selected = i === optionIndex;
-                const isOther = opt.isOther === true;
+                const isOther = !!opt.isOther;
+                const on = isOther ? !!custom : checked?.has(i);
+                const marker = q.multiple ? (on ? "[x]" : "[ ]") : `${i + 1}.`;
+                const label = isOther && q.multiple && custom
+                  ? `Other: ${custom}`
+                  : opt.label;
+                const editing = isOther && inputMode;
+                const color = selected || editing ? "accent" : "text";
                 const prefix = selected ? theme.fg("accent", "> ") : "  ";
-                const color = selected ? "accent" : "text";
-                // Mark "Type something" differently when in input mode
-                if (isOther && inputMode) {
-                  add(prefix + theme.fg("accent", `${i + 1}. ${opt.label} ✎`));
-                } else {
-                  add(prefix + theme.fg(color, `${i + 1}. ${opt.label}`));
-                }
+                add(
+                  prefix +
+                    theme.fg(color, `${marker} ${label}${editing ? " ✎" : ""}`),
+                );
                 if (opt.description) {
                   add(`     ${theme.fg("muted", opt.description)}`);
                 }
-              }
-            }
+              });
+            };
 
             // Content
             if (inputMode && q) {
@@ -401,10 +495,15 @@ export default function questionnaire(pi: ExtensionAPI) {
 
             lines.push("");
             if (!inputMode) {
-              const help = isMulti
-                ? " Tab/←→ navigate • ↑↓ select • Enter confirm • Esc cancel"
-                : " ↑↓ navigate • Enter select • Esc cancel";
-              add(theme.fg("dim", help));
+              const mq = q?.multiple;
+              const parts = [
+                isMulti && "Tab/←→ navigate",
+                mq ? "↑↓ move" : "↑↓ navigate",
+                mq && "Space toggle",
+                mq || isMulti ? "Enter confirm" : "Enter select",
+                "Esc cancel",
+              ].filter(Boolean);
+              add(theme.fg("dim", ` ${parts.join(" • ")}`));
             }
             add(theme.fg("accent", "─".repeat(width)));
 
@@ -430,10 +529,18 @@ export default function questionnaire(pi: ExtensionAPI) {
       }
 
       const answerLines = result.answers.map((a) => {
-        const qLabel = questions.find((q) => q.id === a.id)?.label || a.id;
-        if (a.wasCustom) {
-          return `${qLabel}: user wrote: ${a.label}`;
+        const q = questions.find((x) => x.id === a.id);
+        const qLabel = q?.label ?? a.id;
+        if (a.values) {
+          const parts = [
+            ...(a.indices ?? []).map((idx, i) => `${idx}. ${a.labels?.[i]}`),
+            ...(a.customText ? [`(wrote) ${a.customText}`] : []),
+          ];
+          return `${qLabel}: user selected (multiple): ${
+            parts.join("; ") || "(none)"
+          }`;
         }
+        if (a.wasCustom) return `${qLabel}: user wrote: ${a.label}`;
         return `${qLabel}: user selected: ${a.index}. ${a.label}`;
       });
 
@@ -443,7 +550,7 @@ export default function questionnaire(pi: ExtensionAPI) {
       };
     },
 
-    renderCall(args, theme) {
+    renderCall(args, theme, _context) {
       const qs = (args.questions as Question[]) || [];
       const count = qs.length;
       const labels = qs.map((q) => q.label || q.id).join(", ");
@@ -455,7 +562,7 @@ export default function questionnaire(pi: ExtensionAPI) {
       return new Text(text, 0, 0);
     },
 
-    renderResult(result, _options, theme) {
+    renderResult(result, _options, theme, _context) {
       const details = result.details as QuestionnaireResult | undefined;
       if (!details) {
         const text = result.content[0];
@@ -465,6 +572,11 @@ export default function questionnaire(pi: ExtensionAPI) {
         return new Text(theme.fg("warning", "Cancelled"), 0, 0);
       }
       const lines = details.answers.map((a) => {
+        if (a.values) {
+          return `${theme.fg("success", "✓ ")}${
+            theme.fg("accent", a.id)
+          }: ${a.label}`;
+        }
         if (a.wasCustom) {
           return `${theme.fg("success", "✓ ")}${theme.fg("accent", a.id)}: ${
             theme.fg("muted", "(wrote) ")
