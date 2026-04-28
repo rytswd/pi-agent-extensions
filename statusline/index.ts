@@ -11,6 +11,7 @@
 import type { ExtensionAPI, ExtensionContext, Theme, ReadonlyFooterDataProvider } from "@mariozechner/pi-coding-agent";
 import { loadSettings, saveSettings, clearCache } from "./src/settings.js";
 import { renderBar, buildBarContext, invalidateVcs, setExtensionStatuses } from "./src/bar.js";
+import { setVcsUpdateCallback } from "./src/vcs.js";
 import { detectProvider, createUsageController, setApiKeyResolver, resetRateLimit } from "./src/providers.js";
 import { getCached } from "./src/cache.js";
 
@@ -134,6 +135,7 @@ export default function statusline(pi: ExtensionAPI) {
 		if (enabled && ctx.hasUI) {
 			setupFooter(ctx);
 			renderWidget();
+			setVcsUpdateCallback(() => tuiRef?.requestRender());
 		}
 
 		if (settings.showUsage) {
@@ -183,6 +185,7 @@ export default function statusline(pi: ExtensionAPI) {
 		usage.stop();
 		currentCtx = undefined;
 		tuiRef = null;
+		setVcsUpdateCallback(null);
 	});
 
 	// ── Command ──────────────────────────────────────────────────────────
