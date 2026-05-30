@@ -171,7 +171,7 @@ export default function statusline(pi: ExtensionAPI) {
 		}
 	});
 
-	pi.on("model_select" as any, async (_event: any, ctx: ExtensionContext) => {
+	pi.on("model_update" as any, async (_event: any, ctx: ExtensionContext) => {
 		currentCtx = ctx;
 		const provider = currentProvider();
 		if (provider) {
