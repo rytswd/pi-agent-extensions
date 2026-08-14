@@ -101,7 +101,7 @@ async function gitCounts(): Promise<Counts | null> {
 	return { modified, added, removed };
 }
 
-let cachedStatus: VcsStatus | null = null;
+let cachedStatus: VcsStatus | null | undefined;
 let inflight = false;
 let seq = 0;
 let onUpdate: (() => void) | null = null;
@@ -111,7 +111,7 @@ export function setVcsUpdateCallback(cb: (() => void) | null): void {
 }
 
 export function invalidateVcs(): void {
-	cachedStatus = null;
+	cachedStatus = undefined;
 	seq++;
 }
 
@@ -258,7 +258,7 @@ async function fetchVcsStatus(cwd: string): Promise<VcsStatus | null> {
  */
 export function getVcsStatus(cwd: string): VcsStatus | null {
 	if (detectRepo(cwd) === null) return null;
-	if (cachedStatus === null && !inflight) {
+	if (cachedStatus === undefined && !inflight) {
 		inflight = true;
 		const mySeq = seq;
 		void fetchVcsStatus(cwd).then((result) => {
@@ -268,5 +268,5 @@ export function getVcsStatus(cwd: string): VcsStatus | null {
 			onUpdate?.();
 		});
 	}
-	return cachedStatus;
+	return cachedStatus ?? null;
 }
