@@ -17,4 +17,4 @@ jobs:
       # a bare checkout has none, so ui.ts cannot resolve @mariozechner/pi-tui.
       # bun install pulls peer deps in by default.
       - run: bun install
-      - run: bun test permission-gate
+      - run: bun test permission-gate statusline
