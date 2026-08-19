@@ -351,11 +351,15 @@ export function createUsageController(onUpdate: (usage: UsageSnapshot | undefine
 			if (timer) clearInterval(timer);
 			const tickMs = Math.min(REFRESH_INTERVAL_S * 1000, 10_000);
 			timer = setInterval(() => {
-				const p = getProvider();
-				if (!p) return;
-				const elapsed = Date.now() - lastFetchAt;
-				if (elapsed >= REFRESH_INTERVAL_S * 1000) {
-					void doRefresh(p);
+				try {
+					const p = getProvider();
+					if (!p) return;
+					const elapsed = Date.now() - lastFetchAt;
+					if (elapsed >= REFRESH_INTERVAL_S * 1000) {
+						doRefresh(p).catch(() => {});
+					}
+				} catch {
+					// never let a timer tick crash the host process
 				}
 			}, tickMs);
 		},

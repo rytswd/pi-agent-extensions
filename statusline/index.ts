@@ -42,12 +42,24 @@ export default function statusline(pi: ExtensionAPI) {
 	}
 
 	function currentProvider() {
-		return detectProvider(currentCtx?.model);
+		try {
+			return detectProvider(currentCtx?.model);
+		} catch {
+			// ctx is stale after session replacement/reload; drop it and wait
+			// for the next session_start/model_update to re-set it.
+			currentCtx = undefined;
+			return undefined;
+		}
 	}
 
 	// ── Widget (single line below editor) ────────────────────────────────
 
 	function renderWidget(): void {
+		try {
+			if (currentCtx) void currentCtx.model; // stale probe: throws if replaced
+		} catch {
+			currentCtx = undefined;
+		}
 		if (!currentCtx || !enabled || !settings.showBar) {
 			currentCtx?.ui.setWidget("statusline-bar", undefined);
 			return;
