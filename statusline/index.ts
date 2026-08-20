@@ -108,7 +108,17 @@ export default function statusline(pi: ExtensionAPI) {
 
 	async function initUsage(ctx: ExtensionContext): Promise<void> {
 		if (ctx.modelRegistry?.getApiKeyForProvider) {
-			setApiKeyResolver((provider) => ctx.modelRegistry.getApiKeyForProvider(provider));
+			// ctx.modelRegistry's getter throws once ctx is stale after session
+			// replacement; this closure is invoked from timer/turn_end-driven
+			// usage refreshes long after that. Fail soft to the auth.json
+			// fallback instead of propagating (a fresh ctx re-registers here).
+			setApiKeyResolver((provider) => {
+				try {
+					return ctx.modelRegistry.getApiKeyForProvider(provider);
+				} catch {
+					return undefined;
+				}
+			});
 		}
 
 		const provider = currentProvider();
@@ -158,7 +168,7 @@ export default function statusline(pi: ExtensionAPI) {
 	pi.on("turn_end", async () => {
 		const provider = currentProvider();
 		if (provider) {
-			void usage.refresh(provider);
+			usage.refresh(provider).catch(() => {});
 		}
 	});
 
@@ -187,7 +197,7 @@ export default function statusline(pi: ExtensionAPI) {
 		currentCtx = ctx;
 		const provider = currentProvider();
 		if (provider) {
-			void usage.refresh(provider);
+			usage.refresh(provider).catch(() => {});
 		}
 		renderWidget();
 		tuiRef?.requestRender();
@@ -213,7 +223,7 @@ export default function statusline(pi: ExtensionAPI) {
 				if (enabled) {
 					setupFooter(ctx);
 					const provider = currentProvider();
-					if (provider) void usage.refresh(provider);
+					if (provider) usage.refresh(provider).catch(() => {});
 					usage.start(currentProvider);
 					renderWidget();
 					ctx.ui.notify("Statusline enabled", "info");
@@ -253,7 +263,17 @@ export default function statusline(pi: ExtensionAPI) {
 
 			if (arg === "refresh") {
 				if (ctx.modelRegistry?.getApiKeyForProvider) {
-					setApiKeyResolver((provider) => ctx.modelRegistry.getApiKeyForProvider(provider));
+					// ctx.modelRegistry's getter throws once ctx is stale after session
+					// replacement; this closure is invoked from timer/turn_end-driven
+					// usage refreshes long after that. Fail soft to the auth.json
+					// fallback instead of propagating (a fresh ctx re-registers here).
+					setApiKeyResolver((provider) => {
+						try {
+							return ctx.modelRegistry.getApiKeyForProvider(provider);
+						} catch {
+							return undefined;
+						}
+					});
 				}
 				resetRateLimit();
 				const provider = currentProvider();
