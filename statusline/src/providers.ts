@@ -302,21 +302,28 @@ export function createUsageController(onUpdate: (usage: UsageSnapshot | undefine
 	let lastFetchAt = 0;
 
 	async function doRefresh(provider: ProviderName): Promise<UsageSnapshot | undefined> {
-		const promise = fetchUsage(provider);
-		if (!promise) {
-			cached = undefined;
-			onUpdate(undefined);
-			return undefined;
+		// Usage refresh is background telemetry: no failure in here (stale
+		// ctx, network error, parse error) should ever propagate into the
+		// host's event loop. Degrade to the last cached snapshot instead.
+		try {
+			const promise = fetchUsage(provider);
+			if (!promise) {
+				cached = undefined;
+				onUpdate(undefined);
+				return undefined;
+			}
+			const result = await promise;
+			lastFetchAt = Date.now();
+			if (result.windows.length > 0) {
+				cached = result;
+			} else if (cached?.provider !== provider) {
+				cached = undefined;
+			}
+			onUpdate(cached);
+			return cached;
+		} catch {
+			return cached;
 		}
-		const result = await promise;
-		lastFetchAt = Date.now();
-		if (result.windows.length > 0) {
-			cached = result;
-		} else if (cached?.provider !== provider) {
-			cached = undefined;
-		}
-		onUpdate(cached);
-		return cached;
 	}
 
 	return {
@@ -351,11 +358,15 @@ export function createUsageController(onUpdate: (usage: UsageSnapshot | undefine
 			if (timer) clearInterval(timer);
 			const tickMs = Math.min(REFRESH_INTERVAL_S * 1000, 10_000);
 			timer = setInterval(() => {
-				const p = getProvider();
-				if (!p) return;
-				const elapsed = Date.now() - lastFetchAt;
-				if (elapsed >= REFRESH_INTERVAL_S * 1000) {
-					void doRefresh(p);
+				try {
+					const p = getProvider();
+					if (!p) return;
+					const elapsed = Date.now() - lastFetchAt;
+					if (elapsed >= REFRESH_INTERVAL_S * 1000) {
+						doRefresh(p).catch(() => {});
+					}
+				} catch {
+					// never let a timer tick crash the host process
 				}
 			}, tickMs);
 		},
