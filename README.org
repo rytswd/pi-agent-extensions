@@ -575,6 +575,20 @@ Errors show with red background:
 #+html:</details>
 
 #+html:<details>
+#+html:<summary><strong>nushell</strong> - run the <code>bash</code> tool through Nushell, gated by permission-gate rules</summary>
+#+html:<br>
+
+- *Source*: [[https://github.com/rytswd/pi-agent-extensions/tree/main/nushell][nushell/]]
+- *License*: MIT
+- *Requirements*: =nu= in =PATH=; without it the extension behaves exactly like =permission-gate=
+
+Re-registers pi's =bash= tool with =nu= as the interpreter (=createBashTool= with =shellPath=), so streaming, tail truncation, timeouts and abort handling are unchanged; the tool description and prompt guidelines tell the model it is writing Nushell. If =$XDG_CONFIG_HOME/nushell/pi.nu= exists it is sourced before every script.
+
+Includes =permission-gate= (same =/gate= command, config files, rules and events — load this /or/ =permission-gate=, not both) with a different parser: the script is tokenized by =nu= itself (=ast --flatten=) and mapped onto argv pipelines — commands inside closures, =( )= subexpressions, =if=/=def= bodies, =^external= and =run-external= included. =sh -c= strings recurse into the POSIX parser, =nu -c= strings into the nu one. Scripts nu cannot parse, or whose command name only exists at runtime (=^$cmd=), count as unverified and prompt (block when headless).
+
+#+html:</details>
+
+#+html:<details>
 #+html:<summary><strong>direnv</strong> - Auto-loads environment variables from <code>.envrc</code> files</summary>
 #+html:<br>
 

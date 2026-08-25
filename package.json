@@ -28,7 +28,7 @@
       "direnv",
       "fetch",
       "notify",
-      "permission-gate",
+      "nushell",
       "questionnaire",
       "slow-mode",
       "stash",

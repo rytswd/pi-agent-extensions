@@ -21,13 +21,13 @@
  */
 
 import type { ExtensionAPI, ExtensionContext, BashToolCallEvent } from "@mariozechner/pi-coding-agent";
-import { EVENTS, type CompiledRule, type GateHelpers, type WarnFn } from "./types.ts";
+import { EVENTS, type ArgvPipeline, type CompiledRule, type GateHelpers, type WarnFn } from "./types.ts";
 import { searchPaths } from "./builtin-rules.ts";
 import { anyCmd, hasFlag } from "./helpers.ts";
-import { deferredScripts, nestedScripts, pipelines, SHELLS, simpleCommands, unwrap, unwrapSteps } from "./shell.ts";
+import { collectPipelines, deferredScripts, nestedScripts, pipelines, SHELLS, simpleCommands, unwrap, unwrapSteps } from "./shell.ts";
 import { matchEvidence, matchRules } from "./match.ts";
 import { compileRules, type ConfigLayers, loadConfig, saveUserJson } from "./config.ts";
-import { showReviewPrompt } from "./ui.ts";
+import { type MatchDetail, showReviewPrompt } from "./ui.ts";
 
 const GATE_SUBCMDS = "list(ls)|off <group>|on <group>|add|remove(rm)|reload";
 const HELPERS: GateHelpers = {
@@ -36,9 +36,24 @@ const HELPERS: GateHelpers = {
 	anyCmd, hasFlag, SHELLS,
 };
 
+/**
+ * How a `bash` tool command is turned into pipelines for the argv rules.
+ * The default is the POSIX parser (shell.ts); the nushell extension plugs
+ * in nu's own parser. `unverified` names a reason the analysis is
+ * incomplete (parse error, runtime-built command name) — that prompts on
+ * its own, since an unparsed script is unverified rather than safe.
+ */
+export type Analyze = (command: string) => Promise<{ pipelines: ArgvPipeline[]; unverified?: string }>;
+
+const analyzeSh: Analyze = async (command) => ({ pipelines: collectPipelines(command) });
+
 // ── extension ────────────────────────────────────────────────────────────
 
 export default function permissionGate(pi: ExtensionAPI) {
+	createGate(pi, analyzeSh);
+}
+
+export function createGate(pi: ExtensionAPI, analyze: Analyze): void {
 	// PI_NO_GATE=1 disables the extension entirely (prompts and block
 	// rules). Exact match on "1": treating any non-empty value as a
 	// disable made PI_NO_GATE=0 turn the gate off — the standard env-var
@@ -82,26 +97,30 @@ export default function permissionGate(pi: ExtensionAPI) {
 		// instead of blocking cleanly, and the handler contract is "never
 		// throw" (loadConfig sanitizes; this is defense in depth).
 		let matched: CompiledRule[];
+		let unverified: string | undefined;
 		try {
-			matched = matchRules(command, rules);
+			const analysis = await analyze(command);
+			unverified = analysis.unverified;
+			matched = matchRules(command, rules, analysis.pipelines);
 		} catch (err) {
 			if (ctx.hasUI) {
 				ctx.ui.notify(`permission-gate: rule evaluation failed: ${(err as Error).message}`, "warning");
 			}
 			return { block: true, reason: "Blocked: permission-gate rule evaluation failed — fix the gate config (see /gate list) and retry" };
 		}
-		if (matched.length === 0) return undefined;
-
 		// Block wins over prompt and ignores the /gate toggle.
 		const block = matched.find((r) => r.action === "block");
 		if (block) {
 			return { block: true, reason: block.reason ?? `Blocked (${block.label})` };
 		}
 
-		const prompts = matched.filter((r) => r.action === "prompt");
-		if (!promptsEnabled || prompts.length === 0) return undefined;
+		const matches: MatchDetail[] = matched
+			.filter((r) => r.action === "prompt")
+			.map((r) => ({ label: r.label, evidence: matchEvidence(command, r) }));
+		if (unverified) matches.push({ label: `unverified (${unverified})` });
+		if (!promptsEnabled || matches.length === 0) return undefined;
 
-		const labels = prompts.map((m) => m.label).join(", ");
+		const labels = matches.map((m) => m.label).join(", ");
 		if (!ctx.hasUI) {
 			return { block: true, reason: `Dangerous command blocked (${labels}) — no UI` };
 		}
@@ -109,7 +128,6 @@ export default function permissionGate(pi: ExtensionAPI) {
 		// showReviewPrompt emits EVENTS.waiting itself, *after* arming its
 		// EVENTS.respond listener — emitting it here lost the answer of any
 		// responder that reacted synchronously.
-		const matches = prompts.map((r) => ({ label: r.label, evidence: matchEvidence(command, r) }));
 		const result = await showReviewPrompt(ctx, command, labels, pi.events, matches);
 		pi.events.emit(EVENTS.resolved);
 

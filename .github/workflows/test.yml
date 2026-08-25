@@ -17,6 +17,7 @@ jobs:
       # a bare checkout has none, so ui.ts cannot resolve @mariozechner/pi-tui.
       # bun install pulls peer deps in by default.
       - run: bun install
+      - uses: hustcer/setup-nu@v3
       # slow-mode's tests pin PI_SLOW_MODE_DIFF=builtin, so they do not need
       # difftastic or delta on the runner.
-      - run: bun test permission-gate statusline slow-mode
+      - run: bun test permission-gate statusline slow-mode nushell
