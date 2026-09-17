@@ -494,6 +494,24 @@ Tab/←→ navigate • ↑↓ select • Enter confirm • Esc cancel
 #+html:</details>
 
 #+html:<details>
+#+html:<summary><strong>inbox</strong> - Per-session socket for async events into the conversation</summary>
+#+html:<br>
+
+- *Source*: [[https://github.com/rytswd/pi-agent-extensions/tree/main/inbox][inbox/]]
+- *License*: MIT
+- *Env*: =$PI_INBOX= (socket path), =$PI_SESSION_ID=
+
+*Description*: Tool calls are synchronous, so once a background job is detached the agent normally has to poll. This extension listens on =$XDG_RUNTIME_DIR/pi-inbox/<pid>.sock= and exports the path as =$PI_INBOX= to every tool subprocess. Each connection becomes one message (JSON ={"source": "...", "text": "..."}= or plain text, 16 KB cap) that is delivered right away when the agent is idle, otherwise as a follow-up after the current run, and rendered as a compact =▌inbox <source>= block.
+
+#+begin_src bash
+echo '{"source":"ci","text":"build green"}' | nc -U "$PI_INBOX"
+#+end_src
+
+Producers: [[https://github.com/Mic92/mics-skills/tree/main/queue][queue]] reports detached tasks finishing, the =python= extension exposes =notify()=.
+
+#+html:</details>
+
+#+html:<details>
 #+html:<summary><strong>notify</strong> - Desktop notification when agent finishes</summary>
 #+html:<br>
 
@@ -654,6 +672,7 @@ pi
 
 - *permission-gate:* Prompts on =rm -r= / =git push -f= / …, hard-blocks whole-tree =find= / =rg= scans — =/gate list= to see rules
 - *stash:* Press =Alt+S= to stash editor text, =Alt+S= again to restore
+- *inbox:* =echo hi | nc -U $PI_INBOX= from a tool subprocess wakes the agent
 - *notify:* Desktop notification when agent finishes — =/notify= to toggle
 - *slow-mode:* Type =/slow-mode= to toggle the review gate
 - *fetch:* The LLM will use it for HTTP requests — try asking it to fetch a URL

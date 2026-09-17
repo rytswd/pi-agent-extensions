@@ -27,6 +27,7 @@
     "extensions": [
       "direnv",
       "fetch",
+      "inbox",
       "notify",
       "permission-gate",
       "questionnaire",

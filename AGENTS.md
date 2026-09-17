@@ -17,6 +17,7 @@ This is **pi-agent-extensions** — a collection of [pi](https://github.com/mari
 | `direnv/` | Loads direnv environment variables on session start and after bash commands |
 | `fetch/` | HTTP request tool — fetches URLs, downloads files, shows curl equivalent |
 | `questionnaire/` | Multi-question tool for LLM-driven user input |
+| `inbox/` | Per-session unix socket (`$PI_INBOX`) turning external events into follow-up messages |
 | `slow-mode/` | Review gate for write/edit tool calls — toggle with `/slow-mode` |
 
 ## Essential Context
