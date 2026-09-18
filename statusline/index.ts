@@ -24,7 +24,6 @@ export default function statusline(pi: ExtensionAPI) {
 	let enabled = true;
 	let currentCtx: ExtensionContext | undefined;
 	let tuiRef: any = null;
-	let getThinkingLevelFn: (() => string) | null = null;
 
 	// ── Usage controller ─────────────────────────────────────────────────
 
@@ -32,12 +31,12 @@ export default function statusline(pi: ExtensionAPI) {
 		renderWidget();
 	});
 
-	/** Get usage: in-memory first, then file cache fallback. */
+	/** Get usage for the active provider only, then fall back to its file cache. */
 	function getUsage() {
-		const mem = usage.current();
-		if (mem) return mem;
 		const provider = currentProvider();
 		if (!provider) return undefined;
+		const mem = usage.current();
+		if (mem?.provider === provider) return mem;
 		return getCached(provider, 5 * 60 * 1000);
 	}
 
@@ -46,7 +45,7 @@ export default function statusline(pi: ExtensionAPI) {
 			return detectProvider(currentCtx?.model);
 		} catch {
 			// ctx is stale after session replacement/reload; drop it and wait
-			// for the next session_start/model_update to re-set it.
+			// for the next session_start/model_select to re-set it.
 			currentCtx = undefined;
 			return undefined;
 		}
@@ -91,7 +90,7 @@ export default function statusline(pi: ExtensionAPI) {
 			(_tui: any, theme: Theme) => ({
 				render(width: number) {
 					if (!currentCtx) return [];
-					const thinkingLevel = getThinkingLevelFn?.() ?? "off";
+					const thinkingLevel = pi.getThinkingLevel();
 					const subUsage = settings.showUsage ? getUsage() : undefined;
 					const barCtx = buildBarContext(currentCtx, thinkingLevel, subUsage, settings.contextFormat);
 					const line = renderBar(theme, barCtx, width);
@@ -154,8 +153,6 @@ export default function statusline(pi: ExtensionAPI) {
 		currentCtx = ctx;
 		settings = loadSettings();
 		clearCache();
-		getThinkingLevelFn =
-			typeof (ctx as any).getThinkingLevel === "function" ? () => (ctx as any).getThinkingLevel() : null;
 
 		// PI_STATUSLINE=minimal disables usage fetching
 		if (process.env.PI_STATUSLINE === "minimal") {
@@ -174,6 +171,7 @@ export default function statusline(pi: ExtensionAPI) {
 	});
 
 	pi.on("turn_end", async () => {
+		if (!enabled || !settings.showUsage) return;
 		const provider = currentProvider();
 		if (provider) {
 			usage.refresh(provider).catch(() => {});
@@ -201,12 +199,17 @@ export default function statusline(pi: ExtensionAPI) {
 		}
 	});
 
-	pi.on("model_update" as any, async (_event: any, ctx: ExtensionContext) => {
+	pi.on("model_select", async (_event, ctx) => {
 		currentCtx = ctx;
-		const provider = currentProvider();
-		if (provider) {
-			usage.refresh(provider).catch(() => {});
+		if (enabled && settings.showUsage) {
+			const provider = currentProvider();
+			if (provider) usage.refresh(provider).catch(() => {});
 		}
+		renderWidget();
+		tuiRef?.requestRender();
+	});
+
+	pi.on("thinking_level_select", async () => {
 		renderWidget();
 		tuiRef?.requestRender();
 	});
@@ -235,9 +238,7 @@ export default function statusline(pi: ExtensionAPI) {
 				enabled = !enabled;
 				if (enabled) {
 					setupFooter(ctx);
-					const provider = currentProvider();
-					if (provider) usage.refresh(provider).catch(() => {});
-					usage.start(currentProvider);
+					if (settings.showUsage) await initUsage(ctx);
 					renderWidget();
 					ctx.ui.notify("Statusline enabled", "info");
 				} else {
@@ -253,6 +254,12 @@ export default function statusline(pi: ExtensionAPI) {
 			if (arg === "usage") {
 				settings.showUsage = !settings.showUsage;
 				saveSettings(settings);
+				if (settings.showUsage && enabled) {
+					await initUsage(ctx);
+				} else {
+					usage.stop();
+					setApiKeyResolver(undefined);
+				}
 				renderWidget();
 				ctx.ui.notify(`Usage: ${settings.showUsage ? "on" : "off"}`, "info");
 				return;
