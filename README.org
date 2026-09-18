@@ -512,6 +512,35 @@ Producers: [[https://github.com/Mic92/mics-skills/tree/main/queue][queue]] repor
 #+html:</details>
 
 #+html:<details>
+#+html:<summary><strong>python</strong> - Persistent Python interpreter tool</summary>
+#+html:<br>
+
+- *Source*: [[https://github.com/rytswd/pi-agent-extensions/tree/main/python][python/]]
+- *License*: MIT
+- *Requirements*: =python3=
+- *Config*: =~/.config/pi-agent-extensions/python/config.json= with optional =python= (interpreter path) and =prompt= (appended to the tool description: installed packages, house rules)
+- *Command*: =/python-restart=
+
+*Description*: Registers a =python= tool backed by one long-lived interpreter per session (=driver.py=, JSON lines over private fds so user code cannot corrupt the protocol). Variables, imports and =pexpect= children survive between calls, a trailing expression is echoed like in a REPL, matplotlib figures come back as images, output is tail-truncated and a =timeout= interrupts the cell without losing state. With the =inbox= extension loaded a =notify(text, source="python")= helper is predefined so background threads can report back asynchronously.
+
+Example =config.json= via home-manager, giving the tool its own interpreter with a few libraries and telling the model about them:
+
+#+begin_src nix
+{ pkgs, ... }:
+let
+  python = pkgs.python3.withPackages (ps: [ ps.polars ps.matplotlib ps.requests ps.pexpect ]);
+in
+{
+  xdg.configFile."pi-agent-extensions/python/config.json".text = builtins.toJSON {
+    python = "${python}/bin/python3";
+    prompt = "Available besides stdlib: polars, matplotlib, requests, pexpect. Drive interactive programs with pexpect, always pass timeout= to expect().";
+  };
+}
+#+end_src
+
+#+html:</details>
+
+#+html:<details>
 #+html:<summary><strong>notify</strong> - Desktop notification when agent finishes</summary>
 #+html:<br>
 
@@ -672,6 +701,7 @@ pi
 
 - *permission-gate:* Prompts on =rm -r= / =git push -f= / …, hard-blocks whole-tree =find= / =rg= scans — =/gate list= to see rules
 - *stash:* Press =Alt+S= to stash editor text, =Alt+S= again to restore
+- *python:* Ask it to analyse a CSV. State persists between calls
 - *inbox:* =echo hi | nc -U $PI_INBOX= from a tool subprocess wakes the agent
 - *notify:* Desktop notification when agent finishes — =/notify= to toggle
 - *slow-mode:* Type =/slow-mode= to toggle the review gate
