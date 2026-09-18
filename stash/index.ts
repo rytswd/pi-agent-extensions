@@ -15,11 +15,11 @@
  * Status shows "stash 📋N" (session) or "stash 📋N+M" (session+global).
  */
 
-import * as fs from "node:fs";
 import * as path from "node:path";
 import { homedir } from "node:os";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { SelectList } from "@mariozechner/pi-tui";
+import { loadStashFile, saveStashFile } from "./storage.js";
 
 const MAX_STASHES = 9;
 
@@ -38,32 +38,25 @@ function sessionStashPath(sessionId: string): string {
 	return path.join(dataDir(), "sessions", `${sessionId}.json`);
 }
 
-// ── Persistence ──────────────────────────────────────────────────────────
-
-function loadStashFile(filePath: string): string[] {
-	try {
-		if (!fs.existsSync(filePath)) return [];
-		const data = JSON.parse(fs.readFileSync(filePath, "utf-8"));
-		if (Array.isArray(data)) return data.filter((s: unknown) => typeof s === "string");
-	} catch {}
-	return [];
-}
-
-function saveStashFile(filePath: string, stashes: string[]): void {
-	try {
-		const dir = path.dirname(filePath);
-		fs.mkdirSync(dir, { recursive: true });
-		fs.writeFileSync(filePath, JSON.stringify(stashes, null, 2) + "\n");
-	} catch {}
-}
-
 // ── Extension ────────────────────────────────────────────────────────────
 
-export default function stash(pi: ExtensionAPI) {
+export interface StashStorage {
+	load(filePath: string, rootDir: string): string[];
+	save(filePath: string, stashes: string[], rootDir: string): void;
+}
+
+const defaultStorage: StashStorage = {
+	load: loadStashFile,
+	save: saveStashFile,
+};
+
+export default function stash(pi: ExtensionAPI, storage: StashStorage = defaultStorage) {
 	let sessionStashes: string[] = [];
 	let globalStashes: string[] = [];
 	let sessionId = "";
 	let currentCtx: ExtensionContext | undefined;
+	let sessionLoadFailed = false;
+	let globalLoadFailed = false;
 
 	function hasText(text: string): boolean {
 		return text.trim().length > 0;
@@ -75,17 +68,56 @@ export default function stash(pi: ExtensionAPI) {
 		return `${tag}${i + 1}. ${p.length > 55 ? p.slice(0, 52) + "…" : p}`;
 	}
 
-	function saveSession(): void {
-		if (sessionId) saveStashFile(sessionStashPath(sessionId), sessionStashes);
+	function persistenceError(
+		ctx: ExtensionContext | undefined,
+		scope: string,
+		action: "could not be loaded" | "was not saved",
+		error: unknown,
+	): void {
+		const detail = error instanceof Error ? error.message : String(error);
+		ctx?.ui.notify(`${scope} stash ${action}: ${detail}`, "error");
 	}
 
-	function saveGlobal(): void {
-		saveStashFile(globalStashPath(), globalStashes);
+	function saveSession(ctx: ExtensionContext | undefined = currentCtx): boolean {
+		if (!sessionId) return true;
+		if (sessionLoadFailed) {
+			persistenceError(ctx, "Session", "was not saved", "the existing stash could not be loaded");
+			return false;
+		}
+		try {
+			storage.save(sessionStashPath(sessionId), sessionStashes, dataDir());
+			return true;
+		} catch (error) {
+			persistenceError(ctx, "Session", "was not saved", error);
+			return false;
+		}
+	}
+
+	function saveGlobal(ctx: ExtensionContext | undefined = currentCtx): boolean {
+		if (globalLoadFailed) {
+			persistenceError(ctx, "Global", "was not saved", "the existing stash could not be loaded");
+			return false;
+		}
+		try {
+			storage.save(globalStashPath(), globalStashes, dataDir());
+			return true;
+		} catch (error) {
+			persistenceError(ctx, "Global", "was not saved", error);
+			return false;
+		}
 	}
 
 	/** Reload global stash from disk (picks up changes from other sessions). */
-	function syncGlobal(): void {
-		globalStashes = loadStashFile(globalStashPath());
+	function syncGlobal(ctx: ExtensionContext): boolean {
+		try {
+			globalStashes = storage.load(globalStashPath(), dataDir());
+			globalLoadFailed = false;
+			return true;
+		} catch (error) {
+			globalLoadFailed = true;
+			persistenceError(ctx, "Global", "could not be loaded", error);
+			return false;
+		}
 	}
 
 	// Track whether global stash has been used in this session
@@ -119,7 +151,10 @@ export default function stash(pi: ExtensionAPI) {
 					return;
 				}
 				sessionStashes.push(editorText);
-				saveSession();
+				if (!saveSession(ctx)) {
+					sessionStashes.pop();
+					return;
+				}
 				ctx.ui.setEditorText("");
 				updateStatus(ctx);
 				ctx.ui.notify(`Stashed (#${sessionStashes.length})`, "info");
@@ -133,8 +168,12 @@ export default function stash(pi: ExtensionAPI) {
 			}
 
 			if (sessionStashes.length === 1) {
-				ctx.ui.setEditorText(sessionStashes.pop()!);
-				saveSession();
+				const restored = sessionStashes.pop()!;
+				if (!saveSession(ctx)) {
+					sessionStashes.push(restored);
+					return;
+				}
+				ctx.ui.setEditorText(restored);
 				updateStatus(ctx);
 				ctx.ui.notify("Restored", "info");
 				return;
@@ -152,7 +191,7 @@ export default function stash(pi: ExtensionAPI) {
 			if (!ctx.hasUI) return;
 			currentCtx = ctx;
 
-			syncGlobal();
+			if (!syncGlobal(ctx)) return;
 
 			const editorText = ctx.ui.getEditorText();
 
@@ -163,7 +202,10 @@ export default function stash(pi: ExtensionAPI) {
 					return;
 				}
 				globalStashes.push(editorText);
-				saveGlobal();
+				if (!saveGlobal(ctx)) {
+					globalStashes.pop();
+					return;
+				}
 				globalUsed = true;
 				ctx.ui.setEditorText("");
 				updateStatus(ctx);
@@ -235,8 +277,12 @@ export default function stash(pi: ExtensionAPI) {
 		if (!result) return;
 
 		if (result.action === "pop") {
-			ctx.ui.setEditorText(globalStashes.splice(result.index, 1)[0]);
-			saveGlobal();
+			const popped = globalStashes.splice(result.index, 1)[0];
+			if (!saveGlobal(ctx)) {
+				globalStashes.splice(result.index, 0, popped);
+				return;
+			}
+			ctx.ui.setEditorText(popped);
 			globalUsed = globalStashes.length > 0;
 			updateStatus(ctx);
 			ctx.ui.notify(`Popped #${result.index + 1} from global`, "info");
@@ -245,8 +291,11 @@ export default function stash(pi: ExtensionAPI) {
 			globalUsed = true;
 			ctx.ui.notify(`Applied #${result.index + 1} from global (kept in stash)`, "info");
 		} else if (result.action === "delete") {
-			globalStashes.splice(result.index, 1);
-			saveGlobal();
+			const deleted = globalStashes.splice(result.index, 1)[0];
+			if (!saveGlobal(ctx)) {
+				globalStashes.splice(result.index, 0, deleted);
+				return;
+			}
 			globalUsed = globalStashes.length > 0;
 			updateStatus(ctx);
 			ctx.ui.notify(`Deleted #${result.index + 1} from global`, "info");
@@ -263,7 +312,7 @@ export default function stash(pi: ExtensionAPI) {
 		ctx: ExtensionContext,
 		stashes: string[],
 		scope: string,
-		save: () => void,
+		save: () => boolean,
 	): Promise<void> {
 		const result = await ctx.ui.custom<{ action: "restore" | "delete"; index: number } | null>(
 			(tui, theme, _kb, done) => {
@@ -316,15 +365,22 @@ export default function stash(pi: ExtensionAPI) {
 
 		if (result.action === "restore") {
 			if (result.index >= 0 && result.index < stashes.length) {
-				ctx.ui.setEditorText(stashes.splice(result.index, 1)[0]);
-				save();
+				const restored = stashes.splice(result.index, 1)[0];
+				if (!save()) {
+					stashes.splice(result.index, 0, restored);
+					return;
+				}
+				ctx.ui.setEditorText(restored);
 				updateStatus(ctx);
 				ctx.ui.notify(`Restored #${result.index + 1} (${scope.toLowerCase()})`, "info");
 			}
 		} else if (result.action === "delete") {
 			if (result.index >= 0 && result.index < stashes.length) {
-				stashes.splice(result.index, 1);
-				save();
+				const deleted = stashes.splice(result.index, 1)[0];
+				if (!save()) {
+					stashes.splice(result.index, 0, deleted);
+					return;
+				}
 				updateStatus(ctx);
 				ctx.ui.notify(`Deleted #${result.index + 1} (${scope.toLowerCase()})`, "info");
 				if (stashes.length > 1) {
@@ -345,9 +401,25 @@ export default function stash(pi: ExtensionAPI) {
 		const sf = ctx.sessionManager?.getSessionFile?.();
 		sessionId = sf ? path.basename(sf, ".jsonl") : `${process.pid}`;
 
-		// Load from disk (survives /reload and restarts)
-		sessionStashes = loadStashFile(sessionStashPath(sessionId));
-		globalStashes = loadStashFile(globalStashPath());
+		// Load from disk (survives /reload and restarts). Refuse to overwrite a
+		// file that could not be read or parsed; treating it as empty would turn
+		// the next save into silent data loss.
+		try {
+			sessionStashes = storage.load(sessionStashPath(sessionId), dataDir());
+			sessionLoadFailed = false;
+		} catch (error) {
+			sessionStashes = [];
+			sessionLoadFailed = true;
+			persistenceError(ctx, "Session", "could not be loaded", error);
+		}
+		try {
+			globalStashes = storage.load(globalStashPath(), dataDir());
+			globalLoadFailed = false;
+		} catch (error) {
+			globalStashes = [];
+			globalLoadFailed = true;
+			persistenceError(ctx, "Global", "could not be loaded", error);
+		}
 		globalUsed = globalStashes.length > 0;
 		updateStatus(ctx);
 	});

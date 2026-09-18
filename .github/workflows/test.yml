@@ -19,4 +19,4 @@ jobs:
       - run: bun install
       # slow-mode's tests pin PI_SLOW_MODE_DIFF=builtin, so they do not need
       # difftastic or delta on the runner.
-      - run: bun test permission-gate statusline slow-mode
+      - run: bun test permission-gate stash statusline slow-mode
