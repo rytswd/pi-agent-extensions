@@ -5,11 +5,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 let spawnCalls = 0;
+const spawnCwds: string[] = [];
 
 mock.module("node:child_process", () => ({
 	spawnSync: () => ({}),
-	spawn: () => {
+	spawn: (_cmd: string, _args: string[], options: { cwd?: string }) => {
 		spawnCalls++;
+		if (options.cwd) spawnCwds.push(options.cwd);
 		const proc = new EventEmitter() as EventEmitter & {
 			stdout: EventEmitter;
 			pid: number;
@@ -30,10 +32,13 @@ mock.module("node:child_process", () => ({
 	},
 }));
 
-const { getVcsStatus, invalidateVcs, setVcsUpdateCallback } = await import("./vcs.ts");
+const { getVcsStatus, invalidateVcs, invalidateVcsForRepoCreation, setVcsUpdateCallback } = await import("./vcs.ts");
 const tempDir = mkdtempSync(join(tmpdir(), "statusline-vcs-"));
 const repoDir = join(tempDir, "repo");
+const secondRepoDir = join(tempDir, "repo-two");
+const initializedLaterDir = join(tempDir, "initialized-later");
 mkdirSync(join(repoDir, ".git"), { recursive: true });
+mkdirSync(join(secondRepoDir, ".git"), { recursive: true });
 
 afterAll(() => {
 	setVcsUpdateCallback(null);
@@ -67,4 +72,41 @@ test("caches a failed VCS lookup until invalidated", async () => {
 	await secondUpdate;
 
 	expect(spawnCalls).toBe(2);
+	expect(spawnCwds).toEqual([repoDir, repoDir]);
+});
+
+test("retries a missing repository while a user init command may be running", async () => {
+	mkdirSync(initializedLaterDir, { recursive: true });
+	invalidateVcsForRepoCreation();
+
+	// A render during command execution observes no repository.
+	expect(getVcsStatus(initializedLaterDir)).toBeNull();
+	const before = spawnCalls;
+
+	// The completion render must not reuse that negative lookup.
+	mkdirSync(join(initializedLaterDir, ".git"));
+	const updated = new Promise<void>((resolve) => setVcsUpdateCallback(resolve));
+	expect(getVcsStatus(initializedLaterDir)).toBeNull();
+	await updated;
+
+	expect(spawnCalls - before).toBe(1);
+	expect(spawnCwds.at(-1)).toBe(initializedLaterDir);
+});
+
+test("runs VCS commands in the detected root and does not reuse another repo's cache", async () => {
+	invalidateVcs();
+	const before = spawnCalls;
+
+	async function lookup(cwd: string): Promise<void> {
+		await new Promise<void>((resolve) => {
+			setVcsUpdateCallback(resolve);
+			expect(getVcsStatus(cwd)).toBeNull();
+		});
+	}
+
+	await lookup(repoDir);
+	await lookup(secondRepoDir);
+
+	expect(spawnCalls - before).toBe(2);
+	expect(spawnCwds.slice(-2)).toEqual([repoDir, secondRepoDir]);
 });
