@@ -18,6 +18,8 @@ This is **pi-agent-extensions** — a collection of [pi](https://github.com/mari
 | `nushell/` | Runs the `bash` tool through Nushell and gates it with permission-gate's rules via nu's parser (supersedes loading `permission-gate/` directly) |
 | `fetch/` | HTTP request tool — fetches URLs, downloads files, shows curl equivalent |
 | `questionnaire/` | Multi-question tool for LLM-driven user input |
+| `inbox/` | Per-session unix socket (`$PI_INBOX`) turning external events into follow-up messages |
+| `python/` | Persistent Python interpreter tool with REPL semantics, matplotlib images and `notify()` into inbox |
 | `slow-mode/` | Review gate for write/edit tool calls — toggle with `/slow-mode` |
 
 ## Essential Context

@@ -27,8 +27,11 @@
     "extensions": [
       "direnv",
       "fetch",
+      "inbox",
       "notify",
       "nushell",
+      "permission-gate",
+      "python",
       "questionnaire",
       "slow-mode",
       "stash",
