@@ -29,6 +29,7 @@
       "fetch",
       "inbox",
       "notify",
+      "nushell",
       "permission-gate",
       "python",
       "questionnaire",

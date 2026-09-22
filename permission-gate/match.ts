@@ -27,8 +27,7 @@ const MAX_EVIDENCE_LENGTH = 200;
 
 /** All rules matching `command`. Pipelines and the decoded spelling are
  * computed lazily and at most once per call. */
-export function matchRules(command: string, rules: CompiledRule[]): CompiledRule[] {
-	let argvPipes: ArgvPipeline[] | undefined;
+export function matchRules(command: string, rules: CompiledRule[], argvPipes?: ArgvPipeline[]): CompiledRule[] {
 	let decoded: string | undefined;
 	// Regex rules run against the raw string *and* the tokenizer-decoded
 	// words (quotes stripped, escapes decoded, redirect targets included —
